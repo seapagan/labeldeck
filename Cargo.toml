@@ -1,0 +1,39 @@
+[package]
+name = "labeldeck"
+version = "0.1.0"
+edition = "2024"
+# Provisional floor (edition 2024 minimum); the proven MSRV replaces this
+# after cargo-msrv verification against the final dependency graph.
+rust-version = "1.85"
+description = "Export, diff, and safely synchronize GitHub repository labels from a canonical JSON file"
+repository = "https://github.com/seapagan/labeldeck"
+license = "MIT OR Apache-2.0"
+keywords = ["github", "labels", "sync", "cli", "automation"]
+categories = ["command-line-utilities"]
+include = [
+    "CHANGELOG.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.md",
+    "src/**",
+    "tests/**",
+]
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+rpassword = "7.5.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+toml = { version = "1.1.6", default-features = false, features = ["parse", "serde"] }
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[lints.rust]
+unsafe_code = "deny"
