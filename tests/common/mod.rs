@@ -131,6 +131,17 @@ impl MockGitHub {
             problems
                 .push(format!("mismatched requests: {:#?}", state.mismatches));
         }
+        if problems.is_empty() {
+            return;
+        }
+        problems.push(format!(
+            "requests received: {:#?}",
+            state
+                .requests
+                .iter()
+                .map(|r| (&r.method, &r.path))
+                .collect::<Vec<_>>()
+        ));
         if !state.queue.is_empty() {
             problems.push(format!(
                 "unmet expectations: {:#?}",

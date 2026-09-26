@@ -5,5 +5,4 @@
 //! compilation.
 
 mod common;
-mod github_client;
-mod sync;
+mod suite;
