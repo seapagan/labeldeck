@@ -1,7 +1,6 @@
 //! `labeldeck export`.
 
 use std::io::Write;
-use std::path::Path;
 
 use crate::cli::STDOUT_FILE;
 use crate::commands::{
