@@ -1,11 +1,9 @@
 //! Integration tests for the GitHub API client against a local mock
 //! server. No test in this file contacts GitHub.
 
-mod common;
-
 use std::sync::Arc;
 
-use common::{Expectation, labels_json, mock_github};
+use crate::common::{Expectation, labels_json, mock_github};
 use labeldeck::github::{GitHubClient, GithubError, RepoSpec};
 use labeldeck::labels::{Label, LabelColor};
 
@@ -127,7 +125,7 @@ fn create_label_sends_documented_body() {
     let mock = mock_github(vec![
         Expectation::post("/repos/octocat/hello-world/labels")
             .status(201)
-            .body(&common::label_json("new", "00ff00", Some("fresh"))),
+            .body(&crate::common::label_json("new", "00ff00", Some("fresh"))),
     ]);
     let client = GitHubClient::with_base_url(mock.base_url(), None);
     client
@@ -151,7 +149,7 @@ fn create_label_sends_documented_body() {
 fn update_label_patches_only_color_and_description() {
     let mock = mock_github(vec![
         Expectation::patch("/repos/octocat/hello-world/labels/bug")
-            .body(&common::label_json("bug", "ff0000", Some("bad"))),
+            .body(&crate::common::label_json("bug", "ff0000", Some("bad"))),
     ]);
     let client = GitHubClient::with_base_url(mock.base_url(), None);
     client
@@ -174,7 +172,7 @@ fn update_label_patches_only_color_and_description() {
 fn label_names_are_percent_encoded_in_paths() {
     let mock = mock_github(vec![
         Expectation::patch("/repos/octocat/hello-world/labels/help%20wanted")
-            .body(&common::label_json("help wanted", "00ff00", None)),
+            .body(&crate::common::label_json("help wanted", "00ff00", None)),
         Expectation::delete("/repos/octocat/hello-world/labels/a%2Fb")
             .status(204),
     ]);

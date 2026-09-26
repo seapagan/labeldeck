@@ -1,11 +1,9 @@
 //! Integration tests for sync execution against the local mock GitHub.
 //! These verify the safety-critical ordering guarantees.
 
-mod common;
-
 use std::time::Duration;
 
-use common::{Expectation, labels_json, mock_github};
+use crate::common::{Expectation, labels_json, mock_github};
 use labeldeck::github::{GitHubClient, RepoSpec};
 use labeldeck::labels::{Label, LabelColor};
 use labeldeck::plan;
@@ -23,7 +21,7 @@ fn label(name: &str, color: &str, description: &str) -> Label {
     }
 }
 
-fn client(mock: &common::MockGitHub) -> GitHubClient {
+fn client(mock: &crate::common::MockGitHub) -> GitHubClient {
     GitHubClient::with_base_url(mock.base_url(), None)
 }
 
