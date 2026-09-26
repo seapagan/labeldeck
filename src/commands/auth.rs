@@ -136,6 +136,12 @@ pub fn status() -> Result<i32> {
             TokenSource::Stored(path) => {
                 println!("Authentication: stored token at {}", path.display());
             }
+            TokenSource::Ephemeral => {
+                println!(
+                    "Authentication: token supplied interactively for \
+                     this run only"
+                );
+            }
         },
         None => {
             println!(
@@ -181,8 +187,6 @@ pub fn prompt_and_store_login(
         return Err(Error::Auth("no token was entered".to_string()));
     }
 
-    validate_token(token, no_proxy)?;
-
     let store = {
         let mut answer = String::new();
         loop {
@@ -203,17 +207,114 @@ pub fn prompt_and_store_login(
         }
     };
 
-    if store {
+    complete_first_use(config_dir, token, store, |token| {
+        validate_token(token, no_proxy)
+    })
+}
+
+/// Finish a first-use login after the token and store decision exist:
+/// validate, then persist (or deliberately not), returning the token
+/// with accurate provenance.
+///
+/// `store = false` keeps the token in memory only and labels it
+/// [`TokenSource::Ephemeral`]; `store = true` writes the token file and
+/// labels it [`TokenSource::Stored`].
+fn complete_first_use(
+    config_dir: &Path,
+    token: &str,
+    store: bool,
+    validate: impl FnOnce(&str) -> Result<String>,
+) -> Result<ResolvedToken> {
+    validate(token)?;
+    let source = if store {
         store_validated_token(config_dir, token)?;
+        TokenSource::Stored(auth::token_path(config_dir))
     } else {
         println!(
             "Token will be used for this run only; nothing was written \
              to disk."
         );
-    }
-
+        TokenSource::Ephemeral
+    };
     Ok(ResolvedToken {
         token: Arc::from(token),
-        source: TokenSource::Stored(auth::token_path(config_dir)),
+        source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_config_dir() -> std::path::PathBuf {
+        tempfile::tempdir()
+            .expect("temp dir")
+            .keep()
+            .join("labeldeck")
+    }
+
+    fn ok_validate(_: &str) -> Result<String> {
+        Ok("seapagan".to_string())
+    }
+
+    #[test]
+    fn declined_persistence_is_ephemeral_and_writes_nothing() {
+        let dir = temp_config_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let resolved = complete_first_use(
+            &dir,
+            "gh_interactive_token",
+            false,
+            ok_validate,
+        )
+        .unwrap();
+        assert_eq!(&*resolved.token, "gh_interactive_token");
+        assert_eq!(resolved.source, TokenSource::Ephemeral);
+        assert!(
+            !auth::token_path(&dir).exists(),
+            "declined persistence must not create a token file"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn accepted_persistence_is_stored_on_disk() {
+        let dir = temp_config_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let resolved = complete_first_use(
+            &dir,
+            "gh_interactive_token",
+            true,
+            ok_validate,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.source,
+            TokenSource::Stored(auth::token_path(&dir))
+        );
+        assert_eq!(
+            auth::read_stored_token(&dir).as_deref(),
+            Some("gh_interactive_token")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn validation_failure_prevents_any_persistence() {
+        fn reject(_: &str) -> Result<String> {
+            Err(Error::Auth("invalid credentials".to_string()))
+        }
+        let dir = temp_config_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let error = complete_first_use(
+            &dir,
+            "gh_bad_token",
+            true, // even with store accepted, nothing may be written
+            reject,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid credentials"));
+        assert!(!auth::token_path(&dir).exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

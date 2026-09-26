@@ -29,6 +29,9 @@ pub enum TokenSource {
     Environment(&'static str),
     /// The stored token file.
     Stored(PathBuf),
+    /// Supplied interactively during a first-use login and deliberately
+    /// not persisted: memory-only for the current process.
+    Ephemeral,
 }
 
 /// A resolved token and its origin.
