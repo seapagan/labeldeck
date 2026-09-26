@@ -107,11 +107,14 @@ jobs:
             runner: macos-26-intel
             kind: macos
             arch: x86_64
+            # `file` spells the architectures differently per platform.
+            macho_arch: x86_64
             extension: tar.gz
           - target: aarch64-apple-darwin
             runner: macos-26
             kind: macos
             arch: aarch64
+            macho_arch: arm64
             extension: tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-2025
@@ -197,7 +200,7 @@ jobs:
       - name: Verify Mach-O architecture
         if: matrix.kind == 'macos'
         env:
-          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_ARCH: ${{ matrix.macho_arch }}
         run: |
           description=$(file "target/$TARGET/release/labeldeck")
           echo "$description"
@@ -217,7 +220,7 @@ jobs:
       - name: Verify stripped Mach-O architecture
         if: matrix.kind == 'macos'
         env:
-          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_ARCH: ${{ matrix.macho_arch }}
         run: |
           description=$(file "target/$TARGET/release/labeldeck")
           grep -Eq "Mach-O 64-bit executable $EXPECTED_ARCH" <<<"$description" || {
