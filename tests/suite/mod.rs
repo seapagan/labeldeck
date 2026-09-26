@@ -2,4 +2,5 @@
 
 pub mod cli;
 pub mod github_client;
+pub mod sync;
 pub mod sync_accounting;
