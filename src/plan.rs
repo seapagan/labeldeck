@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn identical_up_to_case_is_unchanged() {
         let canonical = vec![label("Bug", "d73a4a", "broken")];
-        let remote = vec![label("bug", "D73A4A", "broken")];
+        let remote = vec![label("bug", "d73a4a", "broken")];
         let result = plan(&canonical, &remote, false);
         assert!(result.is_empty());
         assert_eq!(result.unchanged, ["bug"]);
@@ -173,7 +173,7 @@ mod tests {
         let result = plan(&canonical, &remote, false);
         assert_eq!(result.updates.len(), 2);
         assert_eq!(result.updates[0].current_name, "bug");
-        assert_eq!(result.updates[0].desired.color.as_str(), "FF0000");
+        assert_eq!(result.updates[0].desired.color.as_str(), "ff0000");
         assert_eq!(result.updates[1].current_name, "docs");
     }
 
@@ -222,7 +222,7 @@ mod tests {
             vec![label("bug", "d73a4a", ""), label("docs", "0075ca", "")];
         let result = plan(&[], &remote, true);
         assert_eq!(result.deletes.len(), 2);
-        assert!(result.is_empty() == false);
+        assert!(!result.is_empty());
     }
 
     #[test]

@@ -4,5 +4,6 @@
 //! exercise planning, parsing, and API behaviour directly.
 
 pub mod canonical;
+pub mod github;
 pub mod labels;
 pub mod plan;

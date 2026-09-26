@@ -124,7 +124,7 @@ mod tests {
         let labels = parse(text).unwrap();
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0].name, "bug");
-        assert_eq!(labels[0].color.as_str(), "D73A4A");
+        assert_eq!(labels[0].color.as_str(), "d73a4a");
         assert_eq!(labels[0].description, "Something isn't working");
         assert_eq!(labels[1].description, "");
     }
@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(
             json,
             "[\n  {\n    \"name\": \"bug\",\n    \"color\": \
-             \"D73A4A\",\n    \"description\": \"broken\"\n  }\n]\n"
+             \"d73a4a\",\n    \"description\": \"broken\"\n  }\n]\n"
         );
     }
 

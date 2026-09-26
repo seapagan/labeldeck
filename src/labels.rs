@@ -9,7 +9,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Maximum length GitHub accepts for a label name.
-pub const MAX_NAME_LEN: usize = 100;
+///
+/// GitHub does not document this limit; 50 characters is the observed
+/// behaviour (`422 name is too long (maximum is 50 characters)`). The
+/// server's 422 remains the authority if the limit ever changes.
+pub const MAX_NAME_LEN: usize = 50;
 
 /// Maximum length GitHub accepts for a label description.
 pub const MAX_DESCRIPTION_LEN: usize = 100;
@@ -47,10 +51,11 @@ impl LabelColor {
                 "invalid colour {input:?}: expected 6 hexadecimal digits"
             ));
         }
-        Ok(Self(digits.to_ascii_uppercase()))
+        Ok(Self(digits.to_ascii_lowercase()))
     }
 
-    /// The canonical wire/file representation, e.g. `D73A4A`.
+    /// The canonical wire/file representation, e.g. `d73a4a` (the form
+    /// GitHub itself returns).
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -122,10 +127,10 @@ mod tests {
 
     #[test]
     fn colour_parse_accepts_hash_and_case() {
-        for input in ["d73a4a", "#d73a4a", "D73A4A", "#D73a4A"] {
+        for input in ["d73a4a", "#d73a4a", "d73a4a", "#D73a4A"] {
             assert_eq!(
                 LabelColor::parse(input).unwrap().as_str(),
-                "D73A4A",
+                "d73a4a",
                 "input {input}"
             );
         }
@@ -160,9 +165,9 @@ mod tests {
         let json =
             serde_json::to_string(&LabelColor::parse("#a1b2c3").unwrap())
                 .unwrap();
-        assert_eq!(json, "\"A1B2C3\"");
+        assert_eq!(json, "\"a1b2c3\"");
         let parsed: LabelColor = serde_json::from_str("\"#a1B2C3\"").unwrap();
-        assert_eq!(parsed.as_str(), "A1B2C3");
+        assert_eq!(parsed.as_str(), "a1b2c3");
     }
 
     #[test]
@@ -184,11 +189,11 @@ mod tests {
     #[test]
     fn validate_rejects_long_name() {
         let label = Label {
-            name: "x".repeat(101),
-            color: LabelColor::parse("ABC123").unwrap(),
+            name: "x".repeat(51),
+            color: LabelColor::parse("abc123").unwrap(),
             description: String::new(),
         };
-        assert!(label.validate().unwrap_err().contains("100"));
+        assert!(label.validate().unwrap_err().contains("50"));
     }
 
     #[test]
@@ -204,8 +209,8 @@ mod tests {
     #[test]
     fn validate_accepts_boundary_lengths() {
         let ok = Label {
-            name: "x".repeat(100),
-            color: LabelColor::parse("ABC123").unwrap(),
+            name: "x".repeat(50),
+            color: LabelColor::parse("abc123").unwrap(),
             description: "d".repeat(100),
         };
         assert!(ok.validate().is_ok());
