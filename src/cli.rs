@@ -58,7 +58,8 @@ pub enum Command {
     Diff {
         /// Repository to compare with, as OWNER/REPO.
         repo: String,
-        /// Canonical label file (default: ./labels.json).
+        /// Use PATH exactly instead of ./labels.json or the global
+        /// default deck.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
         /// Delete target-only labels (overrides the configuration).
@@ -73,17 +74,20 @@ pub enum Command {
     #[command(
         after_help = "Creates missing labels, updates changed labels in \
                       place, and (only with pruning enabled) deletes \
-                      target-only labels, reading ./labels.json by default \
-                      (--file PATH overrides). Mutations pause briefly \
-                      between requests per GitHub's rate-limit guidance. \
-                      Deletions remove labels from existing issues and \
-                      pull requests; --dry-run shows the plan without \
-                      changing anything."
+                      target-only labels. The canonical deck is \
+                      ./labels.json, or the global deck in the labeldeck \
+                      configuration directory when no local file exists; \
+                      --file PATH uses that path exactly. Mutations pause \
+                      briefly between requests per GitHub's rate-limit \
+                      guidance. Deletions remove labels from existing \
+                      issues and pull requests; --dry-run shows the plan \
+                      without changing anything."
     )]
     Sync {
         /// Repository to synchronize, as OWNER/REPO.
         repo: String,
-        /// Canonical label file (default: ./labels.json).
+        /// Use PATH exactly instead of ./labels.json or the global
+        /// default deck.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
         /// Delete target-only labels (overrides the configuration).
