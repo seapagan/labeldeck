@@ -239,7 +239,7 @@ Requires a Rust toolchain; see the MSRV below.
 
 ## Minimum Supported Rust Version
 
-The proven MSRV is **1.85** (also the minimum for the Rust 2024 edition). It is verified in CI on every push, and the dependency graph uses the MSRV-aware resolver so dependency updates cannot silently raise it past the declared value.
+The proven MSRV is **1.85.1** (determined with `cargo-msrv` and verified against the full gate on that exact toolchain; 1.85.x is the Rust 2024 edition baseline). It is verified in CI on every push, and the dependency graph uses the MSRV-aware resolver so dependency updates cannot silently raise it past the declared value.
 
 ## Direct GitHub API usage
 

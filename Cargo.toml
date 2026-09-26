@@ -2,9 +2,9 @@
 name = "labeldeck"
 version = "0.1.0"
 edition = "2024"
-# Provisional floor (edition 2024 minimum); the proven MSRV replaces this
-# after cargo-msrv verification against the final dependency graph.
-rust-version = "1.85"
+# Proven with cargo-msrv and independently verified against the full
+# gate (check + tests) on the exact toolchain.
+rust-version = "1.85.1"
 description = "Export, diff, and safely synchronize GitHub repository labels from a canonical JSON file"
 repository = "https://github.com/seapagan/labeldeck"
 license = "MIT OR Apache-2.0"
@@ -38,3 +38,13 @@ all = { level = "warn", priority = -1 }
 
 [lints.rust]
 unsafe_code = "deny"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-fmt = "zip"
