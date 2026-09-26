@@ -223,10 +223,8 @@ fn diff_exit_codes_distinguish_clean_from_differences() {
     let file = canonical_file(
         &isolation,
         "canonical.json",
-        &format!(
-            "[{{\"name\": \"bug\", \"color\": \"d73a4a\", \
-              \"description\": \"\"}}]"
-        ),
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \
+          \"description\": \"\"}]",
     );
 
     // Identical: exit 0.
