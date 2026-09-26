@@ -1,0 +1,439 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  MSRV_VERSION: "1.85.1"
+  RUST_VERSION: 1.98.1
+
+jobs:
+  prepare:
+    name: Prepare release context
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      crate-version: ${{ steps.version.outputs.crate-version }}
+      release-tag: ${{ steps.version.outputs.release-tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: seapagan/setup-rust@a91f5a34c552642ece0e8cef8b5e9226f41a3c0b # v1.0.0
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Resolve and validate release version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          crate_version=$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "labeldeck") | .version')
+          release_tag="v$crate_version"
+          if [ "$EVENT_NAME" = push ]; then
+            if [ "$REF_NAME" != "$release_tag" ]; then
+              echo "error: release tag $REF_NAME does not match Cargo version $crate_version" >&2
+              exit 1
+            fi
+            release_tag=$REF_NAME
+          fi
+          echo "crate-version=$crate_version" >> "$GITHUB_OUTPUT"
+          echo "release-tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    env:
+      ARCHIVE_NAME: labeldeck-${{ needs.prepare.outputs.release-tag }}-${{ matrix.target }}.${{ matrix.extension }}
+      BUILD_IMAGE: ${{ matrix.image }}
+      CRATE_VERSION: ${{ needs.prepare.outputs.crate-version }}
+      TARGET: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            # quay.io/pypa/manylinux_2_28_x86_64:latest, resolved 2026-09-26.
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:407f771c51a2c3e83ebe5a7970b4289ead3a6db21d9b9c089168775cad11d328
+            kind: linux
+            libc: gnu
+            arch: x86_64
+            extension: tar.gz
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            # quay.io/pypa/musllinux_1_2_x86_64:latest, resolved 2026-09-26.
+            image: quay.io/pypa/musllinux_1_2_x86_64@sha256:bcd644f5f08de4c286b4e8a99652d106a7e56881d8e0b3f92d471f05f5b60fd3
+            kind: linux
+            libc: musl
+            arch: x86_64
+            extension: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            # quay.io/pypa/manylinux_2_28_aarch64:latest, resolved 2026-09-26.
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:c22ffd129ac99a8a42d1f2c2f4e88a9089288dd9ee987a7092da1c7dc48f27a9
+            kind: linux
+            libc: gnu
+            arch: aarch64
+            extension: tar.gz
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            # quay.io/pypa/musllinux_1_2_aarch64:latest, resolved 2026-09-26.
+            image: quay.io/pypa/musllinux_1_2_aarch64@sha256:fecc36f309839b485f04e36b6fd2272d98b84936e68122f3de9bd65c253e76dc
+            kind: linux
+            libc: musl
+            arch: aarch64
+            extension: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-26-intel
+            kind: macos
+            arch: x86_64
+            extension: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-26
+            kind: macos
+            arch: aarch64
+            extension: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            kind: windows
+            arch: x86_64
+            extension: zip
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-vs2026-arm
+            kind: windows
+            arch: aarch64
+            extension: zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ----- Linux: controlled-libc container builds ---------------------
+
+      - name: Build in controlled libc container
+        if: matrix.kind == 'linux'
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/work" \
+            --workdir /work \
+            --env RUST_VERSION \
+            --env TARGET \
+            "$BUILD_IMAGE" \
+            /bin/bash -ceu '
+              export CARGO_HOME=/tmp/labeldeck-cargo
+              export RUSTUP_HOME=/tmp/labeldeck-rustup
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs |
+                sh -s -- -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION"
+              export PATH="$CARGO_HOME/bin:$PATH"
+              rustup target add "$TARGET"
+              cargo build --release --locked --target "$TARGET"
+            '
+
+      - name: Verify unstripped ELF compatibility
+        if: matrix.kind == 'linux'
+        env:
+          ARCH: ${{ matrix.arch }}
+          LIBC: ${{ matrix.libc }}
+        run: scripts/verify-release-binary.sh "$LIBC" "$ARCH" "target/$TARGET/release/labeldeck"
+
+      - name: Strip release binary (Linux)
+        if: matrix.kind == 'linux'
+        run: |
+          binary="target/$TARGET/release/labeldeck"
+          stat --format='size before stripping: %s bytes' "$binary"
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/work" \
+            --workdir /work \
+            "$BUILD_IMAGE" \
+            strip --strip-all "$binary"
+          stat --format='size after stripping: %s bytes' "$binary"
+
+      - name: Verify stripped ELF compatibility
+        if: matrix.kind == 'linux' && matrix.libc == 'gnu'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: scripts/verify-release-binary.sh gnu "$ARCH" "target/$TARGET/release/labeldeck"
+
+      - name: Verify stripped static ELF
+        if: matrix.kind == 'linux' && matrix.libc == 'musl'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: scripts/verify-release-binary.sh static "$ARCH" "target/$TARGET/release/labeldeck"
+
+      # ----- macOS: native runner builds ----------------------------------
+
+      - name: Install Rust toolchain (macOS)
+        if: matrix.kind == 'macos'
+        uses: seapagan/setup-rust@a91f5a34c552642ece0e8cef8b5e9226f41a3c0b # v1.0.0
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Build release binary (macOS)
+        if: matrix.kind == 'macos'
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Verify Mach-O architecture
+        if: matrix.kind == 'macos'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          description=$(file "target/$TARGET/release/labeldeck")
+          echo "$description"
+          grep -Eq "Mach-O 64-bit executable $EXPECTED_ARCH" <<<"$description" || {
+            echo "error: expected a $EXPECTED_ARCH Mach-O executable" >&2
+            exit 1
+          }
+
+      - name: Strip release binary (macOS)
+        if: matrix.kind == 'macos'
+        run: |
+          binary="target/$TARGET/release/labeldeck"
+          stat -f 'size before stripping: %z bytes' "$binary"
+          strip "$binary"
+          stat -f 'size after stripping: %z bytes' "$binary"
+
+      - name: Verify stripped Mach-O architecture
+        if: matrix.kind == 'macos'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          description=$(file "target/$TARGET/release/labeldeck")
+          grep -Eq "Mach-O 64-bit executable $EXPECTED_ARCH" <<<"$description" || {
+            echo "error: stripped binary is no longer a $EXPECTED_ARCH Mach-O executable" >&2
+            exit 1
+          }
+
+      # ----- Windows: native runner builds ---------------------------------
+
+      - name: Install Rust toolchain (Windows)
+        if: matrix.kind == 'windows'
+        uses: seapagan/setup-rust@a91f5a34c552642ece0e8cef8b5e9226f41a3c0b # v1.0.0
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Build release binary (Windows)
+        if: matrix.kind == 'windows'
+        run: cargo build --release --locked --target "$env:TARGET"
+
+      - name: Verify PE architecture
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          & ./scripts/verify-release-binary.ps1 -Arch $env:EXPECTED_ARCH -Binary "target/$env:TARGET/release/labeldeck.exe"
+
+      # ----- Shared: smoke test and packaging -------------------------------
+
+      - name: Smoke-test version output (Unix)
+        if: matrix.kind != 'windows'
+        run: |
+          output=$(eval '"target/$TARGET/release/labeldeck" --version')
+          expected="labeldeck $CRATE_VERSION"
+          if [ "$output" != "$expected" ]; then
+            echo "error: expected '$expected', got '$output'" >&2
+            exit 1
+          fi
+
+      - name: Smoke-test version output (Windows)
+        shell: pwsh
+        run: |
+          $output = & "target/$env:TARGET/release/labeldeck.exe" --version
+          $expected = "labeldeck $env:CRATE_VERSION"
+          if ($output -ne $expected) {
+            Write-Error "expected '$expected', got '$output'"
+            exit 1
+          }
+
+      - name: Package archive and checksum (Unix)
+        if: matrix.kind != 'windows'
+        run: |
+          archive_root="$RUNNER_TEMP/labeldeck-release"
+          mkdir -p "$archive_root"
+          install -m 755 "target/$TARGET/release/labeldeck" "$archive_root/labeldeck"
+          cp LICENSE-MIT LICENSE-APACHE README.md "$archive_root/"
+          tar -czf "$ARCHIVE_NAME" -C "$archive_root" \
+            labeldeck LICENSE-MIT LICENSE-APACHE README.md
+          sha256sum "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256"
+
+      - name: Package archive and checksum (Windows)
+        shell: pwsh
+        run: |
+          $archiveRoot = Join-Path $env:RUNNER_TEMP 'labeldeck-release'
+          New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
+          Copy-Item "target/$env:TARGET/release/labeldeck.exe" $archiveRoot
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, README.md $archiveRoot
+          Compress-Archive -Path (Join-Path $archiveRoot '*') -DestinationPath $env:ARCHIVE_NAME
+          $hash = (Get-FileHash $env:ARCHIVE_NAME -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:ARCHIVE_NAME" | Set-Content -NoNewline "$env:ARCHIVE_NAME.sha256"
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE_NAME }}
+            ${{ env.ARCHIVE_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish immutable release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Create the draft release and upload its assets.
+      id-token: write # Mint the Sigstore signing identity.
+      attestations: write # Store build provenance in GitHub.
+      artifact-metadata: write # Record attested artifact metadata.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG_NAME: ${{ needs.prepare.outputs.release-tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download all build outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete release asset set
+        run: |
+          for entry in \
+            x86_64-unknown-linux-gnu:tar.gz \
+            x86_64-unknown-linux-musl:tar.gz \
+            aarch64-unknown-linux-gnu:tar.gz \
+            aarch64-unknown-linux-musl:tar.gz \
+            x86_64-apple-darwin:tar.gz \
+            aarch64-apple-darwin:tar.gz \
+            x86_64-pc-windows-msvc:zip \
+            aarch64-pc-windows-msvc:zip
+          do
+            target=${entry%%:*}
+            extension=${entry#*:}
+            archive="labeldeck-$TAG_NAME-$target.$extension"
+            test -s "dist/$archive" || {
+              echo "error: missing or empty release asset: $archive" >&2
+              exit 1
+            }
+            test -s "dist/$archive.sha256" || {
+              echo "error: missing or empty checksum asset: $archive.sha256" >&2
+              exit 1
+            }
+            (cd dist && sha256sum -c "$archive.sha256")
+          done
+
+      - name: Create or validate draft release
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          owner=${GH_REPO%%/*}
+          name=${GH_REPO#*/}
+          if ! response=$(gh api graphql \
+            -F owner="$owner" \
+            -F name="$name" \
+            -F tag="$TAG_NAME" \
+            -f query="query(\$owner: String!, \$name: String!, \$tag: String!) {
+              repository(owner: \$owner, name: \$name) {
+                release(tagName: \$tag) { isDraft immutable }
+              }
+            }")
+          then
+            echo "error: could not determine whether release $TAG_NAME exists" >&2
+            exit 1
+          fi
+          release=$(printf '%s' "$response" | jq -c '.data.repository.release')
+          if [ "$release" != null ]; then
+            draft=$(printf '%s' "$release" | jq -r .isDraft)
+            immutable=$(printf '%s' "$release" | jq -r .immutable)
+            if [ "$draft" != true ] || [ "$immutable" = true ]; then
+              echo "error: release $TAG_NAME is already published and cannot be changed" >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG_NAME" \
+              --verify-tag \
+              --draft \
+              --title "$TAG_NAME" \
+              --generate-notes
+          fi
+
+      - name: Attest release archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: Upload all draft release assets
+        run: gh release upload "$TAG_NAME" dist/* --clobber
+
+      - name: Verify uploaded asset set
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          expected="$RUNNER_TEMP/expected-assets"
+          actual="$RUNNER_TEMP/actual-assets"
+          for entry in \
+            x86_64-unknown-linux-gnu:tar.gz \
+            x86_64-unknown-linux-musl:tar.gz \
+            aarch64-unknown-linux-gnu:tar.gz \
+            aarch64-unknown-linux-musl:tar.gz \
+            x86_64-apple-darwin:tar.gz \
+            aarch64-apple-darwin:tar.gz \
+            x86_64-pc-windows-msvc:zip \
+            aarch64-pc-windows-msvc:zip
+          do
+            target=${entry%%:*}
+            extension=${entry#*:}
+            echo "labeldeck-$TAG_NAME-$target.$extension"
+            echo "labeldeck-$TAG_NAME-$target.$extension.sha256"
+          done | sort > "$expected"
+          gh release view "$TAG_NAME" \
+            --repo "$GH_REPO" \
+            --json assets \
+            --jq '.assets[] | select(.size > 0) | .name' | sort > "$actual"
+          diff -u "$expected" "$actual"
+
+      - name: Publish release
+        run: gh release edit "$TAG_NAME" --draft=false
+
+      - name: Require immutable published release
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          immutable=$(gh api "repos/$GH_REPO/releases/tags/$TAG_NAME" --jq '.immutable')
+          if [ "$immutable" != true ]; then
+            echo "error: GitHub release immutability must be enabled for this repository" >&2
+            exit 1
+          fi

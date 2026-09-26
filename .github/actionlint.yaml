@@ -1,0 +1,11 @@
+# actionlint configuration.
+#
+# `windows-11-vs2026-arm` became generally available on 2026-08-19
+# (actions/runner-images#14592) but actionlint 1.7.12 ships a runner-label
+# database from before that date and flags the label as unknown. The label
+# is verified valid; this targeted exception exists only until actionlint
+# learns it and must be removed then.
+paths:
+  .github/workflows/*.yml:
+    ignore:
+      - 'label "windows-11-vs2026-arm" is unknown'
