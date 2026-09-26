@@ -6,18 +6,20 @@
 //! the canonical set still wants.
 //!
 //! GitHub's documented best practice is to pause between mutative
-//! requests to avoid secondary rate limits, so executions sleep briefly
-//! between mutations. This makes large syncs slower and much safer.
+//! requests to avoid secondary rate limits, so executions wait briefly
+//! before every mutation except the first. This makes large syncs slower
+//! and much safer.
 
 use std::thread;
 use std::time::Duration;
 
 use crate::github::{GitHubClient, GithubError, RepoSpec};
-use crate::plan::Plan;
+use crate::labels::Label;
+use crate::plan::{Deletion, Plan, Update};
 
-/// Pause between mutative API calls (GitHub best practice: avoid
-/// secondary rate limits such as the 80 content-creating requests/minute
-/// ceiling).
+/// Pause before each mutative API call except the first (GitHub best
+/// practice: avoid secondary rate limits such as the 80 content-creating
+/// requests/minute ceiling).
 const MUTATION_PAUSE: Duration = Duration::from_secs(1);
 
 /// Which phase an execution stopped in.
@@ -40,9 +42,10 @@ pub struct SyncFailure {
 /// What an execution actually did.
 ///
 /// GitHub's REST API is not transactional: applied operations stay
-/// applied. When `failure` is set, `skipped` lists everything that was
-/// planned but never attempted, so users see exactly where the run
-/// stopped instead of a false claim of rollback.
+/// applied. The three lists partition every planned mutation exactly:
+/// an operation appears in `applied` (succeeded), in `failure` (the one
+/// operation that was attempted and failed; execution stops there), or
+/// in `skipped` (never attempted because execution had already stopped).
 #[derive(Debug, Default)]
 pub struct SyncOutcome {
     /// Operations applied successfully, in execution order.
@@ -70,6 +73,43 @@ impl Reporter for () {
     fn operation(&mut self, _description: &str) {}
 }
 
+impl<R: Reporter> Reporter for &mut R {
+    fn operation(&mut self, description: &str) {
+        (**self).operation(description);
+    }
+}
+
+/// How long to wait before the mutation with this zero-based, run-wide
+/// index: the first mutation of the run is issued immediately, every
+/// later one waits `pause`.
+///
+/// Extracted as a pure function so pacing can be tested without real
+/// sleeps.
+pub fn delay_before_mutation(index: usize, pause: Duration) -> Duration {
+    if index == 0 { Duration::ZERO } else { pause }
+}
+
+/// Issues the pacing waits for one execution run.
+struct Pacer {
+    next_index: usize,
+    pause: Duration,
+}
+
+impl Pacer {
+    fn new(pause: Duration) -> Self {
+        Self {
+            next_index: 0,
+            pause,
+        }
+    }
+
+    /// Wait (if required) immediately *before* a mutation is issued.
+    fn wait(&mut self) {
+        thread::sleep(delay_before_mutation(self.next_index, self.pause));
+        self.next_index += 1;
+    }
+}
+
 /// Execute the plan with GitHub's recommended pause between mutations.
 pub fn execute(
     client: &GitHubClient,
@@ -90,116 +130,141 @@ pub fn execute_with_pause(
     mut reporter: impl Reporter,
 ) -> SyncOutcome {
     let mut outcome = SyncOutcome::default();
-    let mut first_mutation = true;
+    let mut pacer = Pacer::new(pause);
 
-    for label in &plan.creates {
-        let description = format!("create label {:?}", label.name);
+    for (index, label) in plan.creates.iter().enumerate() {
+        let description = create_description(label);
         reporter.operation(&description);
-        if !attempt(
-            client.create_label(repo, label),
-            &mut first_mutation,
-            pause,
-            &mut outcome,
-            Phase::CreateUpdate,
-            description,
-        ) {
-            skip_remaining_updates(&mut outcome, plan);
-            return outcome;
-        }
-    }
-
-    for update in &plan.updates {
-        let description = format!(
-            "update label {:?} in place (colour/description)",
-            update.current_name()
-        );
-        reporter.operation(&description);
-        if !attempt(
-            client.update_label(repo, update.current_name(), &update.desired),
-            &mut first_mutation,
-            pause,
-            &mut outcome,
-            Phase::CreateUpdate,
-            description,
-        ) {
-            skip_remaining_updates(&mut outcome, plan);
-            return outcome;
-        }
-    }
-
-    for deletion in &plan.deletes {
-        let description = format!("delete label {:?}", deletion.name);
-        reporter.operation(&description);
-        if !attempt(
-            client.delete_label(repo, &deletion.name),
-            &mut first_mutation,
-            pause,
-            &mut outcome,
-            Phase::Delete,
-            description,
-        ) {
-            let remaining =
-                plan.deletes.iter().filter(|d| d.name != deletion.name);
-            for skipped in remaining {
+        pacer.wait();
+        match client.create_label(repo, label) {
+            Ok(()) => outcome.applied.push(description),
+            Err(error) => {
+                record_failure(
+                    &mut outcome,
+                    Phase::CreateUpdate,
+                    description,
+                    error,
+                );
+                // A create/update failure means the destructive phase
+                // must not start; every remaining operation is skipped.
+                outcome.skipped.extend(
+                    plan.creates[index + 1..].iter().map(create_description),
+                );
                 outcome
                     .skipped
-                    .push(format!("delete label {:?}", skipped.name));
+                    .extend(plan.updates.iter().map(update_description));
+                outcome
+                    .skipped
+                    .extend(plan.deletes.iter().map(delete_description));
+                return outcome;
             }
-            return outcome;
+        }
+    }
+
+    for (index, update) in plan.updates.iter().enumerate() {
+        let description = update_description(update);
+        reporter.operation(&description);
+        pacer.wait();
+        match client.update_label(repo, update.current_name(), &update.desired)
+        {
+            Ok(()) => outcome.applied.push(description),
+            Err(error) => {
+                record_failure(
+                    &mut outcome,
+                    Phase::CreateUpdate,
+                    description,
+                    error,
+                );
+                outcome.skipped.extend(
+                    plan.updates[index + 1..].iter().map(update_description),
+                );
+                outcome
+                    .skipped
+                    .extend(plan.deletes.iter().map(delete_description));
+                return outcome;
+            }
+        }
+    }
+
+    for (index, deletion) in plan.deletes.iter().enumerate() {
+        let description = delete_description(deletion);
+        reporter.operation(&description);
+        pacer.wait();
+        match client.delete_label(repo, &deletion.name) {
+            Ok(()) => outcome.applied.push(description),
+            Err(error) => {
+                record_failure(
+                    &mut outcome,
+                    Phase::Delete,
+                    description,
+                    error,
+                );
+                outcome.skipped.extend(
+                    plan.deletes[index + 1..].iter().map(delete_description),
+                );
+                return outcome;
+            }
         }
     }
 
     outcome
 }
 
-/// Run one mutation, pausing first when it is not the run's first.
-/// Returns false when the mutation failed and the outcome was updated.
-fn attempt(
-    result: Result<(), GithubError>,
-    first_mutation: &mut bool,
-    pause: Duration,
+fn record_failure(
     outcome: &mut SyncOutcome,
     phase: Phase,
-    description: String,
-) -> bool {
-    if *first_mutation {
-        *first_mutation = false;
-    } else {
-        thread::sleep(pause);
-    }
-    match result {
-        Ok(()) => {
-            outcome.applied.push(description);
-            true
-        }
-        Err(error) => {
-            outcome.failure = Some(SyncFailure {
-                phase,
-                operation: description,
-                error,
-            });
-            false
-        }
-    }
+    operation: String,
+    error: GithubError,
+) {
+    outcome.failure = Some(SyncFailure {
+        phase,
+        operation,
+        error,
+    });
 }
 
-/// A create/update failure means the destructive phase must not start;
-/// every remaining update and delete is skipped.
-fn skip_remaining_updates(outcome: &mut SyncOutcome, plan: &Plan) {
-    for update in &plan.updates {
-        outcome
-            .skipped
-            .push(format!("update label {:?}", update.current_name()));
-    }
-    for deletion in &plan.deletes {
-        outcome
-            .skipped
-            .push(format!("delete label {:?}", deletion.name));
-    }
+fn create_description(label: &Label) -> String {
+    format!("create label {:?}", label.name)
 }
 
-impl<R: Reporter> Reporter for &mut R {
-    fn operation(&mut self, description: &str) {
-        (**self).operation(description);
+fn update_description(update: &Update) -> String {
+    format!(
+        "update label {:?} in place (colour/description)",
+        update.current_name()
+    )
+}
+
+fn delete_description(deletion: &Deletion) -> String {
+    format!("delete label {:?}", deletion.name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_mutation_is_immediate_later_ones_wait() {
+        assert_eq!(
+            delay_before_mutation(0, Duration::from_secs(1)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            delay_before_mutation(1, Duration::from_secs(1)),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            delay_before_mutation(9, Duration::from_secs(1)),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn zero_pause_disables_waiting_entirely() {
+        for index in 0..3 {
+            assert_eq!(
+                delay_before_mutation(index, Duration::ZERO),
+                Duration::ZERO
+            );
+        }
     }
 }
