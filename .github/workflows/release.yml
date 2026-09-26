@@ -258,6 +258,7 @@ jobs:
           fi
 
       - name: Smoke-test version output (Windows)
+        if: matrix.kind == 'windows'
         shell: pwsh
         run: |
           $output = & "target/$env:TARGET/release/labeldeck.exe" --version
@@ -279,6 +280,7 @@ jobs:
           sha256sum "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256"
 
       - name: Package archive and checksum (Windows)
+        if: matrix.kind == 'windows'
         shell: pwsh
         run: |
           $archiveRoot = Join-Path $env:RUNNER_TEMP 'labeldeck-release'
