@@ -59,11 +59,7 @@ pub fn login(token_stdin: bool, no_proxy: bool) -> Result<i32> {
 }
 
 /// Validate a token against the API and report the matching user.
-fn validate_token(
-    config_dir: &Path,
-    token: &str,
-    no_proxy: bool,
-) -> Result<String> {
+fn validate_token(token: &str, no_proxy: bool) -> Result<String> {
     let client = github_client(
         Some(&ResolvedToken {
             token: Arc::from(token),
@@ -92,7 +88,7 @@ fn validate_and_store(
     token: &str,
     no_proxy: bool,
 ) -> Result<()> {
-    validate_token(config_dir, token, no_proxy)?;
+    validate_token(token, no_proxy)?;
     store_validated_token(config_dir, token)
 }
 
@@ -185,7 +181,7 @@ pub fn prompt_and_store_login(
         return Err(Error::Auth("no token was entered".to_string()));
     }
 
-    validate_token(config_dir, token, no_proxy)?;
+    validate_token(token, no_proxy)?;
 
     let store = {
         let mut answer = String::new();
