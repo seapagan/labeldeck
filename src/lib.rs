@@ -5,3 +5,4 @@
 
 pub mod canonical;
 pub mod labels;
+pub mod plan;
