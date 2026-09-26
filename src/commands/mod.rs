@@ -37,15 +37,18 @@ pub fn resolve_token(config_dir: &std::path::Path) -> Option<ResolvedToken> {
 }
 
 /// Build a GitHub client for the resolved token, honouring
-/// [`API_BASE_ENV`] when set.
-pub fn github_client(token: Option<&ResolvedToken>) -> GitHubClient {
+/// [`API_BASE_ENV`] when set. Normal proxy behaviour applies unless
+/// `no_proxy` is set (the `--no-proxy` CLI flag).
+pub fn github_client(
+    token: Option<&ResolvedToken>,
+    no_proxy: bool,
+) -> GitHubClient {
     let token = token.map(|resolved| Arc::clone(&resolved.token));
-    match env(API_BASE_ENV) {
-        Some(base) if !base.trim().is_empty() => {
-            GitHubClient::with_base_url(base.trim(), token)
-        }
-        _ => GitHubClient::new(token),
-    }
+    let base = match env(API_BASE_ENV) {
+        Some(base) if !base.trim().is_empty() => base.trim().to_string(),
+        _ => "https://api.github.com".to_string(),
+    };
+    GitHubClient::with_options(&base, token, no_proxy)
 }
 
 /// Read and validate a canonical label file.
@@ -77,6 +80,7 @@ pub fn remote_labels(
 pub fn credentials_for_write(
     config_dir: &std::path::Path,
     stdin: &mut (impl std::io::BufRead + std::io::IsTerminal),
+    no_proxy: bool,
 ) -> Result<ResolvedToken> {
     if let Some(resolved) = resolve_token(config_dir) {
         return Ok(resolved);
@@ -89,5 +93,5 @@ pub fn credentials_for_write(
                 .to_string(),
         ));
     }
-    auth::prompt_and_store_login(config_dir, stdin)
+    auth::prompt_and_store_login(config_dir, stdin, no_proxy)
 }

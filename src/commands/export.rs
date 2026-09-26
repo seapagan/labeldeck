@@ -11,10 +11,11 @@ pub fn run(
     repo: &str,
     file: &Option<std::path::PathBuf>,
     force: bool,
+    no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = crate::commands::config_dir()?;
-    let client = github_client(resolve_token(&config_dir).as_ref());
+    let client = github_client(resolve_token(&config_dir).as_ref(), no_proxy);
 
     let mut labels = remote_labels(&client, &repo)?;
     let json = crate::canonical::to_json(&mut labels);

@@ -36,7 +36,15 @@ impl Isolation {
             .env_remove("LABELDECK_TOKEN")
             .env_remove("GH_TOKEN")
             .env_remove("GITHUB_TOKEN")
-            .env_remove("LABELDECK_API");
+            .env_remove("LABELDECK_API")
+            .env_remove("HTTP_PROXY")
+            .env_remove("http_proxy")
+            .env_remove("HTTPS_PROXY")
+            .env_remove("https_proxy")
+            .env_remove("ALL_PROXY")
+            .env_remove("all_proxy")
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy");
         command
     }
 }
@@ -637,4 +645,81 @@ fn missing_canonical_file_is_a_clean_error() {
         "{}",
         stderr(&output)
     );
+}
+
+#[test]
+fn proxy_environment_is_honored_by_default() {
+    // The client must use the environment proxy (pointed at a dead
+    // address), so the request fails instead of reaching the mock.
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page("[]", None),
+    ]);
+    let isolation = Isolation::new("proxy-env");
+    let mut command = isolation.command(&["export", REPO]);
+    command.env("HTTP_PROXY", "http://127.0.0.1:9");
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(text.contains("could not reach GitHub"), "{text}");
+}
+
+#[test]
+fn no_proxy_bypasses_the_environment_proxy() {
+    // Same dead proxy in the environment, but --no-proxy must reach the
+    // mock directly. Export, diff, and auth login all go through the
+    // same client construction path.
+    let isolation = Isolation::new("proxy-bypass");
+
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page("[]", None),
+    ]);
+    let mut command = isolation.command(&["export", REPO, "--no-proxy"]);
+    command.env("HTTP_PROXY", "http://127.0.0.1:9");
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+
+    let file = canonical_file(
+        &isolation,
+        "labels.json",
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
+    );
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(&labels_json(&[("bug", "d73a4a", None)]), None),
+    ]);
+    let mut command = isolation.command(&[
+        "diff",
+        file.to_str().unwrap(),
+        REPO,
+        "--no-proxy",
+    ]);
+    command.env("HTTP_PROXY", "http://127.0.0.1:9");
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+
+    let mock = mock_github(vec![
+        Expectation::get("/user").body(r#"{"login":"seapagan"}"#),
+    ]);
+    let mut command =
+        isolation.command(&["auth", "login", "--token-stdin", "--no-proxy"]);
+    command.env("HTTP_PROXY", "http://127.0.0.1:9");
+    against_mock(&mock, &mut command);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn labeldeck");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"gh_test_token_123\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    mock.assert_satisfied();
+    assert!(output.status.success());
 }

@@ -8,7 +8,7 @@ fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
         Command::Export { repo, file, force } => {
-            commands::export::run(&repo, &file, force)
+            commands::export::run(&repo, &file, force, cli.no_proxy)
         }
         Command::Diff {
             file,
@@ -19,6 +19,7 @@ fn main() {
             &file,
             &repo,
             labeldeck::cli::prune_override(prune, no_prune),
+            cli.no_proxy,
         ),
         Command::Sync {
             file,
@@ -31,10 +32,11 @@ fn main() {
             &repo,
             labeldeck::cli::prune_override(prune, no_prune),
             dry_run,
+            cli.no_proxy,
         ),
         Command::Auth(auth) => match auth {
             AuthCommand::Login { token_stdin } => {
-                commands::auth::login(token_stdin)
+                commands::auth::login(token_stdin, cli.no_proxy)
             }
             AuthCommand::Logout => commands::auth::logout(),
             AuthCommand::Status => commands::auth::status(),

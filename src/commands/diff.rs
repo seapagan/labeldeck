@@ -10,13 +10,14 @@ pub fn run(
     file: &std::path::Path,
     repo: &str,
     cli_prune: Option<bool>,
+    no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let canonical = read_canonical(file)?;
     let config_dir = crate::commands::config_dir()?;
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
-    let client = github_client(resolve_token(&config_dir).as_ref());
+    let client = github_client(resolve_token(&config_dir).as_ref(), no_proxy);
     let remote = remote_labels(&client, &repo)?;
 
     let result = plan::plan(&canonical, &remote, prune);

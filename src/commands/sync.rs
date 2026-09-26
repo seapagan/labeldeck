@@ -14,6 +14,7 @@ pub fn run(
     repo: &str,
     cli_prune: Option<bool>,
     dry_run: bool,
+    no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let canonical = read_canonical(file)?;
@@ -23,7 +24,8 @@ pub fn run(
 
     if dry_run {
         // Dry runs only read; they never need credentials.
-        let client = github_client(resolve_token(&config_dir).as_ref());
+        let client =
+            github_client(resolve_token(&config_dir).as_ref(), no_proxy);
         let remote = remote_labels(&client, &repo)?;
         let result = plan::plan(&canonical, &remote, prune);
         eprintln!("Dry run: no changes were made.");
@@ -42,8 +44,9 @@ pub fn run(
 
     let stdin = std::io::stdin();
     let mut locked = stdin.lock();
-    let credentials = credentials_for_write(&config_dir, &mut locked)?;
-    let client = github_client(Some(&credentials));
+    let credentials =
+        credentials_for_write(&config_dir, &mut locked, no_proxy)?;
+    let client = github_client(Some(&credentials), no_proxy);
 
     let remote = remote_labels(&client, &repo)?;
     let result = plan::plan(&canonical, &remote, prune);

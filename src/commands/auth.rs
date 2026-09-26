@@ -8,7 +8,7 @@ use crate::auth::{self, ResolvedToken, TokenSource};
 use crate::commands::{API_BASE_ENV, config_dir, github_client};
 use crate::error::{Error, Result};
 
-pub fn login(token_stdin: bool) -> Result<i32> {
+pub fn login(token_stdin: bool, no_proxy: bool) -> Result<i32> {
     let config_dir = config_dir()?;
     let stdin = std::io::stdin();
     let mut locked = stdin.lock();
@@ -27,7 +27,7 @@ pub fn login(token_stdin: bool) -> Result<i32> {
                 "no token was provided on standard input".to_string(),
             ));
         }
-        validate_and_store(&config_dir, token)?;
+        validate_and_store(&config_dir, token, no_proxy)?;
         return Ok(0);
     }
 
@@ -49,7 +49,7 @@ pub fn login(token_stdin: bool) -> Result<i32> {
         return Err(Error::Auth("no token was entered".to_string()));
     }
 
-    validate_and_store(&config_dir, token)?;
+    validate_and_store(&config_dir, token, no_proxy)?;
     println!(
         "The token is stored; `labeldeck auth logout` removes it. \
          Tokens from LABELDECK_TOKEN, GH_TOKEN, or GITHUB_TOKEN still \
@@ -59,11 +59,18 @@ pub fn login(token_stdin: bool) -> Result<i32> {
 }
 
 /// Validate a token against the API and report the matching user.
-fn validate_token(config_dir: &Path, token: &str) -> Result<String> {
-    let client = github_client(Some(&ResolvedToken {
-        token: Arc::from(token),
-        source: TokenSource::Environment("LABELDECK_TOKEN"),
-    }));
+fn validate_token(
+    config_dir: &Path,
+    token: &str,
+    no_proxy: bool,
+) -> Result<String> {
+    let client = github_client(
+        Some(&ResolvedToken {
+            token: Arc::from(token),
+            source: TokenSource::Environment("LABELDECK_TOKEN"),
+        }),
+        no_proxy,
+    );
     let login = client.authenticated_login().map_err(Error::Github)?;
     println!("Token valid for GitHub user {login}.");
     Ok(login)
@@ -80,8 +87,12 @@ fn store_validated_token(config_dir: &Path, token: &str) -> Result<()> {
 }
 
 /// Validate a token against the API, then persist it (explicit login).
-fn validate_and_store(config_dir: &Path, token: &str) -> Result<()> {
-    validate_token(config_dir, token)?;
+fn validate_and_store(
+    config_dir: &Path,
+    token: &str,
+    no_proxy: bool,
+) -> Result<()> {
+    validate_token(config_dir, token, no_proxy)?;
     store_validated_token(config_dir, token)
 }
 
@@ -154,6 +165,7 @@ pub fn status() -> Result<i32> {
 pub fn prompt_and_store_login(
     config_dir: &Path,
     stdin: &mut (impl BufRead + std::io::IsTerminal),
+    no_proxy: bool,
 ) -> Result<ResolvedToken> {
     if !stdin.is_terminal() {
         return Err(Error::Auth(
@@ -173,7 +185,7 @@ pub fn prompt_and_store_login(
         return Err(Error::Auth("no token was entered".to_string()));
     }
 
-    validate_token(config_dir, token)?;
+    validate_token(config_dir, token, no_proxy)?;
 
     let store = {
         let mut answer = String::new();

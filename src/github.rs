@@ -128,25 +128,39 @@ pub struct GitHubClient {
 
 impl GitHubClient {
     /// Client for the real GitHub API.
+    ///
+    /// Honours the HTTP client's normal proxy behaviour, including
+    /// standard proxy environment variables.
     pub fn new(token: Option<Arc<str>>) -> Self {
-        Self::with_base_url("https://api.github.com", token)
+        Self::with_options("https://api.github.com", token, false)
     }
 
     /// Client for an explicit API base URL (used by tests to point at a
-    /// local mock server).
+    /// local mock server), honouring normal proxy behaviour.
     pub fn with_base_url(base_url: &str, token: Option<Arc<str>>) -> Self {
-        let config = Agent::config_builder()
+        Self::with_options(base_url, token, false)
+    }
+
+    /// Client with an explicit proxy decision: `no_proxy` disables all
+    /// proxy use for this client; otherwise the environment's normal
+    /// proxy discovery applies.
+    pub fn with_options(
+        base_url: &str,
+        token: Option<Arc<str>>,
+        no_proxy: bool,
+    ) -> Self {
+        let mut builder = Agent::config_builder()
             .user_agent(USER_AGENT)
             // Non-2xx responses are inspected here, not converted to
             // errors, so bodies and rate-limit headers stay available.
             .http_status_as_error(false)
-            // Proxy auto-detection from the environment is disabled so
-            // behaviour never depends on ambient proxy variables.
-            .proxy(None)
             .timeout_global(Some(Duration::from_secs(30)))
             .max_redirects(5)
-            .middleware(GitHubHeaders(token))
-            .build();
+            .middleware(GitHubHeaders(token));
+        if no_proxy {
+            builder = builder.proxy(None);
+        }
+        let config = builder.build();
         let agent: Agent = config.into();
         Self {
             agent,

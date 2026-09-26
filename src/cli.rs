@@ -19,6 +19,10 @@ use clap::{Parser, Subcommand};
                   enabled."
 )]
 pub struct Cli {
+    /// Bypass any configured HTTP proxy for this invocation.
+    #[arg(long, global = true)]
+    pub no_proxy: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
