@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Global default deck: `diff` and `sync` fall back to
+  `<config dir>/labels.json` when no `./labels.json` exists, and
+  `export --global` writes that personal default deck (creating the
+  configuration directory if needed). Explicit `--file` paths and
+  present-but-invalid local decks never fall back; overwrite protection
+  applies to every destination.
+
 ### Changed
 
 - `export`, `diff`, and `sync` now take `OWNER/REPO` as their first
