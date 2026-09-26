@@ -31,10 +31,12 @@ pub struct Cli {
 pub enum Command {
     /// Export a repository's labels as a canonical JSON file
     #[command(
-        after_help = "Writes to ./labels.json by default; choose another \
-                      file with --file PATH, or write canonical JSON to \
-                      standard output with --file -. An existing file is \
-                      never overwritten without --force (which cannot be \
+        after_help = "Writes to ./labels.json by default; --global writes \
+                      your personal default deck to the labeldeck \
+                      configuration directory, --file PATH picks an exact \
+                      destination, and --file - writes canonical JSON to \
+                      standard output. An existing file is never \
+                      overwritten without --force (which cannot be \
                       combined with --file -)."
     )]
     Export {
@@ -46,6 +48,10 @@ pub enum Command {
         /// Overwrite the output file even if it already exists.
         #[arg(long)]
         force: bool,
+        /// Write the canonical deck to the labeldeck configuration
+        /// directory instead of the local file.
+        #[arg(long, conflicts_with = "file")]
+        global: bool,
     },
 
     /// Compare a canonical label file with a repository, changing nothing

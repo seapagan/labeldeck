@@ -8,6 +8,7 @@ pub mod canonical;
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod deck;
 pub mod error;
 pub mod github;
 pub mod labels;

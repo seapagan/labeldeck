@@ -36,6 +36,13 @@ pub enum Error {
     /// Invalid combination of command-line options.
     #[error("{0}")]
     Usage(String),
+    /// No canonical label deck exists in any default location.
+    #[error(
+        "no canonical label file found; checked {local} and {global}. \
+         Create one with `labeldeck export OWNER/REPO` (local) or \
+         `labeldeck export OWNER/REPO --global`, or pass --file PATH"
+    )]
+    NoDeckFile { local: PathBuf, global: PathBuf },
 }
 
 /// Convenience alias for command implementations.

@@ -17,11 +17,12 @@ pub fn run(
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
-    let file = file.map(std::path::PathBuf::as_path).unwrap_or_else(|| {
-        std::path::Path::new(crate::cli::DEFAULT_LABELS_FILE)
-    });
-    let canonical = read_canonical(file)?;
     let config_dir = config_dir()?;
+    let deck_path = crate::deck::resolve_read_path(
+        file.map(std::path::PathBuf::as_path),
+        &config_dir,
+    )?;
+    let canonical = read_canonical(&deck_path)?;
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
 
@@ -37,7 +38,7 @@ pub fn run(
         eprintln!(
             "Run again without --dry-run to apply: labeldeck sync {} \
              {}/{} {}",
-            file.display(),
+            deck_path.display(),
             repo.owner,
             repo.name,
             if prune { "--prune" } else { "--no-prune" },

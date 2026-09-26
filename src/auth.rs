@@ -81,6 +81,14 @@ pub fn read_stored_token(config_dir: &Path) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
+/// Create the labeldeck configuration directory when needed, with the
+/// platform-appropriate private permissions used for credential
+/// storage (0700 on Unix; platform defaults elsewhere).
+pub fn ensure_config_dir(config_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(config_dir)?;
+    restrict_directory_permissions(config_dir);
+    Ok(())
+}
 
 /// Persist a token for future use.
 ///
@@ -88,8 +96,7 @@ pub fn read_stored_token(config_dir: &Path) -> Option<String> {
 /// file is written 0600 and the directory is tightened to 0700; other
 /// platforms get the platform default protections.
 pub fn store_token(config_dir: &Path, token: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(config_dir)?;
-    restrict_directory_permissions(config_dir);
+    ensure_config_dir(config_dir)?;
     let path = token_path(config_dir);
     write_private_file(&path, token)
 }

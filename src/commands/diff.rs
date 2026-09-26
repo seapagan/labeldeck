@@ -13,11 +13,12 @@ pub fn run(
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
-    let path = file.map(std::path::PathBuf::as_path).unwrap_or_else(|| {
-        std::path::Path::new(crate::cli::DEFAULT_LABELS_FILE)
-    });
-    let canonical = read_canonical(path)?;
     let config_dir = crate::commands::config_dir()?;
+    let path = crate::deck::resolve_read_path(
+        file.map(std::path::PathBuf::as_path),
+        &config_dir,
+    )?;
+    let canonical = read_canonical(&path)?;
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
     let client = github_client(resolve_token(&config_dir).as_ref(), no_proxy);

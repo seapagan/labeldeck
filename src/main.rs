@@ -7,9 +7,18 @@ use labeldeck::commands;
 fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
-        Command::Export { repo, file, force } => {
-            commands::export::run(&repo, file.as_ref(), force, cli.no_proxy)
-        }
+        Command::Export {
+            repo,
+            file,
+            force,
+            global,
+        } => commands::export::run(
+            &repo,
+            file.as_ref(),
+            force,
+            global,
+            cli.no_proxy,
+        ),
         Command::Diff {
             repo,
             file,

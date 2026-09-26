@@ -7,12 +7,14 @@ use crate::cli::STDOUT_FILE;
 use crate::commands::{
     github_client, remote_labels, repo_spec, resolve_token,
 };
+use crate::deck;
 use crate::error::{Error, Result};
 
 pub fn run(
     repo: &str,
     file: Option<&std::path::PathBuf>,
     force: bool,
+    global: bool,
     no_proxy: bool,
 ) -> Result<i32> {
     // `--file -` writes canonical JSON to standard output; combining it
@@ -50,15 +52,28 @@ pub fn run(
         return Ok(0);
     }
 
-    let path: &std::path::Path = file
-        .map(std::path::PathBuf::as_path)
-        .unwrap_or_else(|| Path::new(crate::cli::DEFAULT_LABELS_FILE));
+    let path = deck::export_destination(
+        file.map(std::path::PathBuf::as_path),
+        global,
+        &config_dir,
+    );
     if path.exists() && !force {
-        return Err(Error::OutputExists {
-            path: path.to_path_buf(),
-        });
+        return Err(Error::OutputExists { path: path.clone() });
     }
-    std::fs::write(path, json.as_bytes()).map_err(|e| Error::Io {
+    if global {
+        // The configuration directory may not exist yet; create it with
+        // the same permissions used for credential storage.
+        crate::auth::ensure_config_dir(&config_dir).map_err(|e| {
+            Error::Io {
+                context: format!(
+                    "could not create configuration directory {}",
+                    config_dir.display()
+                ),
+                message: e.to_string(),
+            }
+        })?;
+    }
+    std::fs::write(&path, json.as_bytes()).map_err(|e| Error::Io {
         context: format!("could not write {}", path.display()),
         message: e.to_string(),
     })?;
