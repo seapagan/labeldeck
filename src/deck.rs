@@ -11,7 +11,7 @@
 //! `--file` is authoritative and never falls back; fallback to the
 //! global deck happens only when the local default file is genuinely
 //! absent (a present-but-invalid local deck is an error, not a reason
-//! to silently switch decks).
+//! to silently switch decks, and neither is a failing existence probe).
 
 use std::path::{Path, PathBuf};
 
@@ -30,21 +30,50 @@ pub fn local_deck_path() -> PathBuf {
     PathBuf::from(DECK_FILE_NAME)
 }
 
-/// Pure resolution core, parameterised by candidate paths so tests need
-/// no working-directory or filesystem-global changes.
-fn resolve_read(
+/// The deck a read command selected, retaining *how* it was chosen so
+/// callers can act on the distinction (e.g. dry-run suggestions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeckSelection {
+    /// An explicit `--file` path, verbatim.
+    Explicit(PathBuf),
+    /// The local `./labels.json` default.
+    Local(PathBuf),
+    /// The global deck in the configuration directory.
+    Global(PathBuf),
+}
+
+impl DeckSelection {
+    /// The resolved deck path, regardless of how it was chosen.
+    pub fn path(&self) -> &Path {
+        match self {
+            DeckSelection::Explicit(path)
+            | DeckSelection::Local(path)
+            | DeckSelection::Global(path) => path,
+        }
+    }
+}
+
+/// Resolution core, parameterised by candidate paths and an existence
+/// probe so tests can exercise every probe outcome (including I/O
+/// failures) without filesystem tricks.
+fn resolve_read_with(
     explicit: Option<&Path>,
     local: &Path,
     global: &Path,
-) -> Result<PathBuf> {
+    mut probe: impl FnMut(&Path) -> std::io::Result<bool>,
+) -> Result<DeckSelection> {
     if let Some(path) = explicit {
-        return Ok(path.to_path_buf());
+        // Explicit paths are selected verbatim; whether they are
+        // readable/valid is the read step's business, not selection's.
+        return Ok(DeckSelection::Explicit(path.to_path_buf()));
     }
-    if local.exists() {
-        return Ok(local.to_path_buf());
+    // A probe that errors (permissions on a parent directory, I/O
+    // failure, ...) must be reported, never treated as "absent".
+    if probe(local).map_err(|e| probe_error(local, e))? {
+        return Ok(DeckSelection::Local(local.to_path_buf()));
     }
-    if global.exists() {
-        return Ok(global.to_path_buf());
+    if probe(global).map_err(|e| probe_error(global, e))? {
+        return Ok(DeckSelection::Global(global.to_path_buf()));
     }
     Err(Error::NoDeckFile {
         local: local.to_path_buf(),
@@ -52,17 +81,46 @@ fn resolve_read(
     })
 }
 
-/// Resolve the deck a read command (`diff`/`sync`) should use.
+fn probe_error(path: &Path, error: std::io::Error) -> Error {
+    Error::Io {
+        context: format!(
+            "could not examine {} while looking for the canonical label \
+             file",
+            path.display()
+        ),
+        message: error.to_string(),
+    }
+}
+
+/// Resolve the deck a read command (`diff`/`sync`) should use, and how
+/// it was chosen.
 ///
 /// Precedence: an explicit `--file` path verbatim; then the local
 /// `./labels.json` if it exists; then the global deck if it exists.
-/// When neither default exists the error names both checked locations
-/// and how to fix the situation.
+/// Fallback happens only on a *confirmed* absence: an existence probe
+/// that fails with an I/O error is reported for the path probed. When
+/// neither default exists the error names both checked locations and
+/// how to fix the situation.
+pub fn resolve_read_selection(
+    explicit: Option<&Path>,
+    config_dir: &Path,
+) -> Result<DeckSelection> {
+    resolve_read_with(
+        explicit,
+        &local_deck_path(),
+        &global_deck_path(config_dir),
+        Path::try_exists,
+    )
+}
+
+/// Resolve the deck a read command should use (path only).
 pub fn resolve_read_path(
     explicit: Option<&Path>,
     config_dir: &Path,
 ) -> Result<PathBuf> {
-    resolve_read(explicit, &local_deck_path(), &global_deck_path(config_dir))
+    Ok(resolve_read_selection(explicit, config_dir)?
+        .path()
+        .to_path_buf())
 }
 
 /// Resolve where `export` should write.
@@ -128,44 +186,148 @@ mod tests {
         }
     }
 
+    /// Injected probes let every outcome — including probe failures —
+    /// be tested deterministically. Probe results are described as
+    /// `Ok(bool)` or an `ErrorKind` (io::Error is not Clone).
+    fn probe_with(
+        local_result: Result<bool, std::io::ErrorKind>,
+        global_result: Result<bool, std::io::ErrorKind>,
+    ) -> impl Fn(Option<&Path>, &Path, &Path) -> Result<DeckSelection> {
+        move |explicit: Option<&Path>, local: &Path, global: &Path| {
+            let mut probes = 0;
+            resolve_read_with(explicit, local, global, move |path| {
+                probes += 1;
+                let outcome = if path == local {
+                    local_result
+                } else {
+                    assert_eq!(probes, 2, "global probed before local");
+                    global_result
+                };
+                outcome.map_err(std::io::Error::from)
+            })
+        }
+    }
+
     #[test]
-    fn explicit_file_is_authoritative_without_fallback() {
+    fn explicit_file_is_authoritative_without_probing_defaults() {
         let sandbox = Sandbox::new();
         let global = sandbox.deck("global-home");
         let explicit = sandbox.dir("explicit").join("chosen.json");
         std::fs::write(&explicit, "[]").unwrap();
-        // Even with the global default present, the explicit path wins —
-        // including when it does not exist (the read error must name the
-        // user's own path, not a silently swapped default).
+        // The probe always errors: explicit selection must never touch
+        // either default, and must not validate the path either.
+        let never = Err(std::io::ErrorKind::PermissionDenied);
+        let resolver = probe_with(never, never);
         assert_eq!(
-            resolve_read(Some(&explicit), &sandbox.deck("ignored"), &global)
+            resolver(Some(&explicit), &sandbox.deck("ignored"), &global)
                 .unwrap(),
-            explicit
+            DeckSelection::Explicit(explicit)
         );
         let missing = sandbox.dir("explicit").join("absent.json");
         assert_eq!(
-            resolve_read(Some(&missing), &sandbox.deck("ignored"), &global)
+            resolver(Some(&missing), &sandbox.deck("ignored"), &global)
                 .unwrap(),
-            missing
+            DeckSelection::Explicit(missing)
         );
     }
+
+    #[test]
+    fn local_probe_true_selects_local_without_probing_global() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.deck("workdir");
+        let global = sandbox.deck("global-home");
+        let resolver =
+            probe_with(Ok(true), Err(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(
+            resolver(None, &local, &global).unwrap(),
+            DeckSelection::Local(local)
+        );
+    }
+
+    #[test]
+    fn local_probe_false_global_probe_true_selects_global() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
+        let global = sandbox.deck("global-home");
+        let resolver = probe_with(Ok(false), Ok(true));
+        assert_eq!(
+            resolver(None, &local, &global).unwrap(),
+            DeckSelection::Global(global)
+        );
+    }
+
+    #[test]
+    fn both_probes_false_names_both_locations() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
+        let global = sandbox.dir("empty-global").join(DECK_FILE_NAME);
+        let error = probe_with(Ok(false), Ok(false))(None, &local, &global)
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("labels.json"), "{message}");
+        assert!(
+            message.contains(global.to_string_lossy().as_ref()),
+            "must name the global location: {message}"
+        );
+        assert!(message.contains("export"), "{message}");
+        assert!(message.contains("--file"), "{message}");
+    }
+
+    #[test]
+    fn local_probe_error_is_reported_without_fallback() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.dir("workdir").join(DECK_FILE_NAME);
+        let global = sandbox.deck("global-home");
+        let error = probe_with(
+            Err(std::io::ErrorKind::PermissionDenied),
+            Ok(true),
+        )(None, &local, &global)
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("could not examine"),
+            "probe failure must be reported: {message}"
+        );
+        assert!(
+            message.contains(local.to_string_lossy().as_ref()),
+            "must name the local path: {message}"
+        );
+        assert!(
+            !message.contains(global.to_string_lossy().as_ref()),
+            "must not implicate the global path: {message}"
+        );
+    }
+
+    #[test]
+    fn global_probe_error_is_reported() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
+        let global = sandbox.dir("global-home").join(DECK_FILE_NAME);
+        let error = probe_with(
+            Ok(false),
+            Err(std::io::ErrorKind::PermissionDenied),
+        )(None, &local, &global)
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("could not examine"), "{message}");
+        assert!(
+            message.contains(global.to_string_lossy().as_ref()),
+            "must name the global path: {message}"
+        );
+    }
+
+    // ----- filesystem-backed behaviour (real try_exists) -------------
 
     #[test]
     fn local_deck_wins_over_global_when_both_exist() {
         let sandbox = Sandbox::new();
         let local = sandbox.deck("workdir");
         let global = sandbox.deck("global-home");
-        assert_eq!(resolve_read(None, &local, &global).unwrap(), local);
-    }
-
-    #[test]
-    fn global_deck_used_when_local_absent() {
-        let sandbox = Sandbox::new();
-        let absent_local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
-        let global = sandbox.deck("global-home");
+        let explicit = None;
         assert_eq!(
-            resolve_read(None, &absent_local, &global).unwrap(),
-            global
+            resolve_read_with(explicit, &local, &global, Path::try_exists)
+                .unwrap(),
+            DeckSelection::Local(local)
         );
     }
 
@@ -178,23 +340,23 @@ mod tests {
         let local = sandbox.dir("bad-workdir").join(DECK_FILE_NAME);
         std::fs::write(&local, "not json").unwrap();
         let global = sandbox.deck("global-home");
-        assert_eq!(resolve_read(None, &local, &global).unwrap(), local);
+        assert_eq!(
+            resolve_read_with(None, &local, &global, Path::try_exists)
+                .unwrap(),
+            DeckSelection::Local(local)
+        );
     }
 
     #[test]
-    fn missing_everywhere_names_both_locations() {
+    fn global_deck_used_when_local_absent_on_disk() {
         let sandbox = Sandbox::new();
-        let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
-        let global = sandbox.dir("empty-global").join(DECK_FILE_NAME);
-        let error = resolve_read(None, &local, &global).unwrap_err();
-        let message = error.to_string();
-        assert!(message.contains("labels.json"), "{message}");
-        assert!(
-            message.contains(global.to_string_lossy().as_ref()),
-            "must name the global location: {message}"
+        let absent_local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
+        let global = sandbox.deck("global-home");
+        assert_eq!(
+            resolve_read_with(None, &absent_local, &global, Path::try_exists,)
+                .unwrap(),
+            DeckSelection::Global(global)
         );
-        assert!(message.contains("export"), "{message}");
-        assert!(message.contains("--file"), "{message}");
     }
 
     #[test]
