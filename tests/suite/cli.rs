@@ -531,6 +531,67 @@ fn auth_login_interactive_requires_a_terminal() {
 }
 
 #[test]
+fn environment_tokens_are_never_persisted() {
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(&labels_json(&[("bug", "d73a4a", None)]), None),
+    ]);
+    let isolation = Isolation::new("env-no-persist");
+    let file = canonical_file(
+        &isolation,
+        "labels.json",
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
+    );
+    let mut command =
+        isolation.command(&["diff", file.to_str().unwrap(), REPO]);
+    command.env("GITHUB_TOKEN", "gh_env_secret_token");
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        !isolation.config_dir.join("token").exists(),
+        "environment token must never be written to disk"
+    );
+
+    // `auth status` with an environment token also reports it without
+    // persisting anything.
+    let mut command = isolation.command(&["auth", "status"]);
+    command.env("GITHUB_TOKEN", "gh_env_secret_token");
+    let output = run(&mut command);
+    assert!(output.status.success());
+    assert!(stdout(&output).contains("GITHUB_TOKEN"));
+    assert!(
+        !isolation.config_dir.join("token").exists(),
+        "auth status must not persist the environment token"
+    );
+}
+
+#[test]
+fn token_never_appears_in_error_output() {
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .status(401)
+            .body(r#"{"message":"Bad credentials"}"#),
+    ]);
+    let isolation = Isolation::new("no-leak");
+    let file = canonical_file(
+        &isolation,
+        "labels.json",
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
+    );
+    let mut command =
+        isolation.command(&["diff", file.to_str().unwrap(), REPO]);
+    command.env("LABELDECK_TOKEN", "gh_super_secret_token_42");
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(2));
+    let text = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !text.contains("gh_super_secret_token_42"),
+        "token leaked into error output: {text}"
+    );
+}
+#[test]
 fn auth_logout_removes_stored_token() {
     let isolation = Isolation::new("logout");
     std::fs::write(isolation.config_dir.join("token"), "x").unwrap();

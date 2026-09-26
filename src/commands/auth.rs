@@ -1,6 +1,6 @@
 //! `labeldeck auth` — login, logout, status.
 
-use std::io::{BufRead, IsTerminal};
+use std::io::{BufRead, IsTerminal, Write as _};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -58,22 +58,31 @@ pub fn login(token_stdin: bool) -> Result<i32> {
     Ok(0)
 }
 
-/// Validate a token against the API, then persist it.
-fn validate_and_store(config_dir: &Path, token: &str) -> Result<()> {
+/// Validate a token against the API and report the matching user.
+fn validate_token(config_dir: &Path, token: &str) -> Result<String> {
     let client = github_client(Some(&ResolvedToken {
         token: Arc::from(token),
         source: TokenSource::Environment("LABELDECK_TOKEN"),
     }));
     let login = client.authenticated_login().map_err(Error::Github)?;
+    println!("Token valid for GitHub user {login}.");
+    Ok(login)
+}
+
+/// Persist an already-validated token.
+fn store_validated_token(config_dir: &Path, token: &str) -> Result<()> {
     auth::store_token(config_dir, token).map_err(|e| Error::Io {
         context: "could not store the token".to_string(),
         message: e.to_string(),
     })?;
-    println!(
-        "Token valid for GitHub user {login}; stored at {}.",
-        auth::token_path(config_dir).display()
-    );
+    println!("Stored at {}.", auth::token_path(config_dir).display());
     Ok(())
+}
+
+/// Validate a token against the API, then persist it (explicit login).
+fn validate_and_store(config_dir: &Path, token: &str) -> Result<()> {
+    validate_token(config_dir, token)?;
+    store_validated_token(config_dir, token)
 }
 
 pub fn logout() -> Result<i32> {
@@ -137,6 +146,11 @@ pub fn status() -> Result<i32> {
 }
 
 /// The interactive first-use login flow used by `sync`.
+///
+/// Prompts securely for a token, validates it against GitHub, then asks
+/// whether to store it (defaulting to yes). Declining keeps the token
+/// in memory for the current process only — nothing is written to disk.
+/// Environment-provided tokens never enter this flow.
 pub fn prompt_and_store_login(
     config_dir: &Path,
     stdin: &mut (impl BufRead + std::io::IsTerminal),
@@ -158,7 +172,38 @@ pub fn prompt_and_store_login(
     if token.is_empty() {
         return Err(Error::Auth("no token was entered".to_string()));
     }
-    validate_and_store(config_dir, token)?;
+
+    validate_token(config_dir, token)?;
+
+    let store = {
+        let mut answer = String::new();
+        loop {
+            print!("Store this token for future use? [Y/n] ");
+            let _ = std::io::stdout().flush();
+            answer.clear();
+            stdin.read_line(&mut answer).map_err(|e| {
+                Error::Auth(format!("could not read the answer: {e}"))
+            })?;
+            match crate::auth::parse_store_answer(&answer) {
+                Some(decision) => break decision,
+                None => {
+                    println!(
+                        "Please answer y, yes, n, or no (Enter means yes)."
+                    );
+                }
+            }
+        }
+    };
+
+    if store {
+        store_validated_token(config_dir, token)?;
+    } else {
+        println!(
+            "Token will be used for this run only; nothing was written \
+             to disk."
+        );
+    }
+
     Ok(ResolvedToken {
         token: Arc::from(token),
         source: TokenSource::Stored(auth::token_path(config_dir)),

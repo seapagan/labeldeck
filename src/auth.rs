@@ -91,6 +91,17 @@ pub fn store_token(config_dir: &Path, token: &str) -> std::io::Result<()> {
     write_private_file(&path, token)
 }
 
+/// Interpret the answer to the "store this token?" prompt.
+///
+/// Empty input (or `y`/`yes`, any case) means store; `n`/`no` means do
+/// not store; anything else is invalid and the caller should re-ask.
+pub fn parse_store_answer(answer: &str) -> Option<bool> {
+    match answer.trim().to_ascii_lowercase().as_str() {
+        "" | "y" | "yes" => Some(true),
+        "n" | "no" => Some(false),
+        _ => None,
+    }
+}
 /// Remove the stored token. Returns whether a file was removed.
 pub fn remove_stored_token(config_dir: &Path) -> std::io::Result<bool> {
     match std::fs::remove_file(token_path(config_dir)) {
@@ -226,6 +237,21 @@ mod tests {
         .unwrap();
         assert_eq!(&*resolved.token, "stored-token");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn store_answer_defaults_to_yes_and_accepts_explicit_variants() {
+        assert_eq!(parse_store_answer(""), Some(true));
+        assert_eq!(parse_store_answer("\n"), Some(true));
+        assert_eq!(parse_store_answer("  \n"), Some(true));
+        assert_eq!(parse_store_answer("y"), Some(true));
+        assert_eq!(parse_store_answer("YES"), Some(true));
+        assert_eq!(parse_store_answer("Yes "), Some(true));
+        assert_eq!(parse_store_answer("n"), Some(false));
+        assert_eq!(parse_store_answer("No"), Some(false));
+        assert_eq!(parse_store_answer(" no\n"), Some(false));
+        assert_eq!(parse_store_answer("maybe"), None);
+        assert_eq!(parse_store_answer("1"), None);
     }
 
     #[test]
