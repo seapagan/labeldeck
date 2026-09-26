@@ -7,16 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `export`, `diff`, and `sync` now take `OWNER/REPO` as their first
+  argument and use `./labels.json` by default; `--file PATH` selects a
+  different canonical file and the old positional `FILE` argument is
+  gone. `export --file -` writes canonical JSON to standard output and
+  rejects `--force`.
+- HTTP proxy environment variables are honoured again; a global
+  `--no-proxy` flag bypasses proxies for one invocation.
+- Sync failures now report an exact applied/failed/skipped partition of
+  the planned mutations (previously applied or failed operations could
+  be misreported as skipped).
+- The one-second mutation pause is now taken before each request after
+  the first instead of after the previous request.
+- The interactive first-use login flow asks before storing the token
+  (default yes); explicit `labeldeck auth login` still stores without
+  an extra confirmation.
+
 ### Added
 
 - Initial implementation of `labeldeck`.
-- `export OWNER/REPO [FILE]`: deterministic canonical JSON output (stdout
-  or file, `--force` required to overwrite), works unauthenticated for
+- `export OWNER/REPO`: deterministic canonical JSON output to
+  `./labels.json` (or `--file PATH` / `--file -` for stdout), with
+  overwrite protection unless `--force`; works unauthenticated for
   public repositories.
-- `diff FILE OWNER/REPO`: non-destructive comparison with
+- `diff OWNER/REPO`: non-destructive comparison with
   `CREATE`/`UPDATE`/`DELETE`/`RETAIN`/`UNCHANGED` reporting and
   diff-style exit codes (0 clean, 1 differences, 2 errors).
-- `sync FILE OWNER/REPO`: safe synchronization — creates missing labels,
+- `sync OWNER/REPO`: safe synchronization — creates missing labels,
   updates changed labels in place via GitHub's update API (never
   delete-and-recreate, preserving issue/PR associations), and deletes
   target-only labels only when pruning is enabled.

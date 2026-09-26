@@ -33,6 +33,9 @@ pub enum Error {
     /// Authentication is required but unavailable.
     #[error("{0}")]
     Auth(String),
+    /// Invalid combination of command-line options.
+    #[error("{0}")]
+    Usage(String),
 }
 
 /// Convenience alias for command implementations.

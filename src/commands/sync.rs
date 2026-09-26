@@ -10,13 +10,16 @@ use crate::plan;
 use crate::sync as sync_engine;
 
 pub fn run(
-    file: &std::path::Path,
     repo: &str,
+    file: Option<&std::path::PathBuf>,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
+    let file = file.map(std::path::PathBuf::as_path).unwrap_or_else(|| {
+        std::path::Path::new(crate::cli::DEFAULT_LABELS_FILE)
+    });
     let canonical = read_canonical(file)?;
     let config_dir = config_dir()?;
     let config = crate::config::load(&config_dir)?;

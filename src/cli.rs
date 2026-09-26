@@ -31,26 +31,30 @@ pub struct Cli {
 pub enum Command {
     /// Export a repository's labels as a canonical JSON file
     #[command(
-        after_help = "Writes to FILE, or to standard output when FILE is \
-                      omitted. An existing FILE is never overwritten \
-                      without --force."
+        after_help = "Writes to ./labels.json by default; choose another \
+                      file with --file PATH, or write canonical JSON to \
+                      standard output with --file -. An existing file is \
+                      never overwritten without --force (which cannot be \
+                      combined with --file -)."
     )]
     Export {
         /// Repository to export, as OWNER/REPO.
         repo: String,
-        /// Output file (standard output when omitted).
+        /// Output file (default: ./labels.json; '-' writes standard output).
+        #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
-        /// Overwrite FILE even if it already exists.
+        /// Overwrite the output file even if it already exists.
         #[arg(long)]
         force: bool,
     },
 
     /// Compare a canonical label file with a repository, changing nothing
     Diff {
-        /// Canonical label file to compare against the repository.
-        file: PathBuf,
         /// Repository to compare with, as OWNER/REPO.
         repo: String,
+        /// Canonical label file (default: ./labels.json).
+        #[arg(long, value_name = "PATH")]
+        file: Option<PathBuf>,
         /// Delete target-only labels (overrides the configuration).
         #[arg(long, conflicts_with = "no_prune")]
         prune: bool,
@@ -63,17 +67,19 @@ pub enum Command {
     #[command(
         after_help = "Creates missing labels, updates changed labels in \
                       place, and (only with pruning enabled) deletes \
-                      target-only labels. Mutations pause briefly between \
-                      requests per GitHub's rate-limit guidance. \
+                      target-only labels, reading ./labels.json by default \
+                      (--file PATH overrides). Mutations pause briefly \
+                      between requests per GitHub's rate-limit guidance. \
                       Deletions remove labels from existing issues and \
                       pull requests; --dry-run shows the plan without \
                       changing anything."
     )]
     Sync {
-        /// Canonical label file to apply.
-        file: PathBuf,
         /// Repository to synchronize, as OWNER/REPO.
         repo: String,
+        /// Canonical label file (default: ./labels.json).
+        #[arg(long, value_name = "PATH")]
+        file: Option<PathBuf>,
         /// Delete target-only labels (overrides the configuration).
         #[arg(long, conflicts_with = "no_prune")]
         prune: bool,
@@ -110,6 +116,12 @@ pub enum AuthCommand {
     /// request and without ever printing the token
     Status,
 }
+
+/// Canonical label file used when `--file` is not supplied.
+pub const DEFAULT_LABELS_FILE: &str = "labels.json";
+
+/// `--file -` selects standard output for `export`.
+pub const STDOUT_FILE: &str = "-";
 
 /// The effective CLI prune override: `Some(true)` for `--prune`,
 /// `Some(false)` for `--no-prune`, `None` when neither flag was passed.

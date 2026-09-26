@@ -28,42 +28,51 @@ export → edit/review the JSON (in a PR) → diff → sync
 ```
 
 ```console
-# Capture the current labels of a repository as a canonical file
-$ labeldeck export seapagan/labeldeck labels.json
+# Capture the current labels of a repository as the canonical file
+$ labeldeck export seapagan/keyhold
 
-# ...review/edit labels.json, commit it, get it code-reviewed...
+# ...review/edit ./labels.json, commit it, get it code-reviewed...
 
 # Preview what a sync would do (no changes, diff-style exit codes)
-$ labeldeck diff labels.json seapagan/labeldeck
+$ labeldeck diff seapagan/lsplus
 
 # Apply: create missing labels, update changed ones in place
-$ labeldeck sync labels.json seapagan/labeldeck
+$ labeldeck sync seapagan/lsplus
 
 # Also delete labels missing from the canonical file (destructive)
-$ labeldeck sync labels.json seapagan/labeldeck --prune
+$ labeldeck sync seapagan/lsplus --prune
 
 # Preview pruning without doing anything
-$ labeldeck sync labels.json seapagan/labeldeck --prune --dry-run
+$ labeldeck sync seapagan/lsplus --prune --dry-run
+
+# Use a different canonical file for any of the above
+$ labeldeck diff seapagan/lsplus --file other.json
 ```
 
 ## CLI surface
 
 ```text
-labeldeck export OWNER/REPO [FILE] [--force]
-labeldeck diff FILE OWNER/REPO [--prune | --no-prune]
-labeldeck sync FILE OWNER/REPO [--prune | --no-prune] [--dry-run]
-labeldeck auth login [--token-stdin]
+labeldeck [--no-proxy] export OWNER/REPO [--file PATH] [--force]
+labeldeck [--no-proxy] diff OWNER/REPO [--file PATH] [--prune | --no-prune]
+labeldeck [--no-proxy] sync OWNER/REPO [--file PATH] [--prune | --no-prune] [--dry-run]
+labeldeck [--no-proxy] auth login [--token-stdin]
 labeldeck auth logout
 labeldeck auth status
 ```
 
+All three repository commands take `OWNER/REPO` as their first argument
+and read or write `./labels.json` unless `--file PATH` selects another
+file. The `--no-proxy` flag (usable anywhere) bypasses any configured
+HTTP proxy for that invocation; by default the normal proxy environment
+(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) is honoured.
+
 ### `export`
 
-Writes the repository's labels as canonical JSON. With no `FILE` the JSON goes to standard output (nothing else is printed there, so it is safe to pipe). With a `FILE`, an existing file is **never** overwritten unless `--force` is given. Export works unauthenticated for public repositories (subject to GitHub's 60 requests/hour anonymous limit).
+Writes the repository's labels as canonical JSON to `./labels.json`. An existing file is **never** overwritten unless `--force` is given (this protection applies to any explicit `--file PATH` too). `--file -` writes the JSON to standard output instead — nothing else is printed there, so it is safe to pipe — and cannot be combined with `--force`, which is rejected as a usage error. Export works unauthenticated for public repositories (subject to GitHub's 60 requests/hour anonymous limit).
 
 ### `diff`
 
-Compares the canonical file with the live repository and prints one line per label, without changing anything:
+Compares `./labels.json` (or the `--file` override) with the live repository and prints one line per label, without changing anything:
 
 ```text
 CREATE bug (color d73a4a, description "Something isn't working")
@@ -77,7 +86,7 @@ UNCHANGED feature
 
 ### `sync`
 
-Applies the plan. Operations are ordered defensively: **all** creates and updates run first, and prune deletions start only after every one of them succeeded. Mutations pause briefly between requests per GitHub's rate-limit guidance, so very large syncs take a little longer and stay within GitHub's secondary limits.
+Applies the plan read from `./labels.json` (or the `--file` override). Operations are ordered defensively: **all** creates and updates run first, and prune deletions start only after every one of them succeeded. Each mutation after the first waits about one second before its request, per GitHub's rate-limit guidance, so very large syncs take a little longer and stay within GitHub's secondary limits.
 
 GitHub's REST API is not transactional. If an operation fails mid-run, `labeldeck` stops, reports exactly what was applied, what failed, and what was skipped — it does not pretend to roll anything back.
 
@@ -130,7 +139,7 @@ LABELDECK_TOKEN → GH_TOKEN → GITHUB_TOKEN → stored labeldeck token → ano
 - Anonymous access works for public repositories (reads only).
 - Private repositories and all write operations require a token.
 
-Tokens are never accepted as command-line arguments, where process listings could observe them. `labeldeck auth login` prompts for the token with the input hidden (`--token-stdin` reads it from standard input in scripts), validates it against GitHub, and offers to store it.
+Tokens are never accepted as command-line arguments, where process listings could observe them. `labeldeck auth login` prompts for the token with the input hidden (`--token-stdin` reads it from standard input in scripts), validates it against GitHub, and stores it — persistence is the purpose of the command, so there is no extra confirmation. The interactive first-use flow that `sync` offers when no token exists behaves differently: it prompts securely, validates, then asks whether to store the token for future use (defaulting to yes). Answering `n` keeps the token in memory for that run only and writes nothing to disk. Environment-provided tokens are never persisted by any command.
 
 Token permissions needed:
 
@@ -174,6 +183,11 @@ Two other environment variables are understood:
 
 - `LABELDECK_API` — override the GitHub API base URL (an internal/testing escape hatch; unset for normal use).
 - `LABELDECK_CONFIG_DIR` — see above.
+
+Proxy handling: standard proxy environment variables
+(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`, upper or lower case)
+are honoured by default. Pass `--no-proxy` to bypass every proxy for a
+single invocation; there is no persistent proxy configuration.
 
 ## Installation
 

@@ -131,7 +131,7 @@ fn export_writes_deterministic_json_to_stdout() {
             ),
     ]);
     let isolation = Isolation::new("export-stdout");
-    let mut command = isolation.command(&["export", REPO]);
+    let mut command = isolation.command(&["export", REPO, "--file", "-"]);
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
     assert!(output.status.success());
@@ -157,7 +157,12 @@ fn export_to_file_refuses_overwrite_without_force() {
     let mock = mock_github(page());
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["export", REPO, target.to_str().unwrap()]),
+        &mut isolation.command(&[
+            "export",
+            REPO,
+            "--file",
+            target.to_str().unwrap(),
+        ]),
     ));
     mock.assert_satisfied();
     assert!(output.status.success());
@@ -166,7 +171,12 @@ fn export_to_file_refuses_overwrite_without_force() {
     let mock = mock_github(page());
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["export", REPO, target.to_str().unwrap()]),
+        &mut isolation.command(&[
+            "export",
+            REPO,
+            "--file",
+            target.to_str().unwrap(),
+        ]),
     ));
     assert_eq!(output.status.code(), Some(2));
     assert!(
@@ -181,6 +191,7 @@ fn export_to_file_refuses_overwrite_without_force() {
         &mut isolation.command(&[
             "export",
             REPO,
+            "--file",
             target.to_str().unwrap(),
             "--force",
         ]),
@@ -196,7 +207,7 @@ fn export_is_anonymous_when_no_token_exists() {
             .labels_page("[]", None),
     ]);
     let isolation = Isolation::new("export-anon");
-    let mut command = isolation.command(&["export", REPO]);
+    let mut command = isolation.command(&["export", REPO, "--file", "-"]);
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
     assert!(output.status.success());
@@ -214,7 +225,7 @@ fn export_with_env_token_sends_bearer() {
             .labels_page("[]", None),
     ]);
     let isolation = Isolation::new("export-token");
-    let mut command = isolation.command(&["export", REPO]);
+    let mut command = isolation.command(&["export", REPO, "--file", "-"]);
     command.env("GH_TOKEN", "gh_cli_env_token");
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -242,7 +253,12 @@ fn diff_exit_codes_distinguish_clean_from_differences() {
     ]);
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["diff", file.to_str().unwrap(), REPO]),
+        &mut isolation.command(&[
+            "diff",
+            REPO,
+            "--file",
+            file.to_str().unwrap(),
+        ]),
     ));
     mock.assert_satisfied();
     assert_eq!(output.status.code(), Some(0));
@@ -258,7 +274,12 @@ fn diff_exit_codes_distinguish_clean_from_differences() {
     ]);
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["diff", file.to_str().unwrap(), REPO]),
+        &mut isolation.command(&[
+            "diff",
+            REPO,
+            "--file",
+            file.to_str().unwrap(),
+        ]),
     ));
     mock.assert_satisfied();
     assert_eq!(output.status.code(), Some(1));
@@ -294,7 +315,12 @@ fn diff_respects_prune_flags_and_config() {
     let mock = remote();
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["diff", file.to_str().unwrap(), REPO]),
+        &mut isolation.command(&[
+            "diff",
+            REPO,
+            "--file",
+            file.to_str().unwrap(),
+        ]),
     ));
     mock.assert_satisfied();
     assert!(stdout(&output).contains("RETAIN legacy"));
@@ -304,7 +330,12 @@ fn diff_respects_prune_flags_and_config() {
     let mock = remote();
     let output = run(against_mock(
         &mock,
-        &mut isolation.command(&["diff", file.to_str().unwrap(), REPO]),
+        &mut isolation.command(&[
+            "diff",
+            REPO,
+            "--file",
+            file.to_str().unwrap(),
+        ]),
     ));
     mock.assert_satisfied();
     assert!(stdout(&output).contains("DELETE legacy"));
@@ -315,8 +346,9 @@ fn diff_respects_prune_flags_and_config() {
         &mock,
         &mut isolation.command(&[
             "diff",
-            file.to_str().unwrap(),
             REPO,
+            "--file",
+            file.to_str().unwrap(),
             "--no-prune",
         ]),
     ));
@@ -330,8 +362,9 @@ fn diff_respects_prune_flags_and_config() {
         &mock,
         &mut isolation.command(&[
             "diff",
-            file.to_str().unwrap(),
             REPO,
+            "--file",
+            file.to_str().unwrap(),
             "--prune",
         ]),
     ));
@@ -349,8 +382,9 @@ fn diff_prune_and_no_prune_conflict_is_a_usage_error() {
     );
     let output = run(&mut isolation.command(&[
         "diff",
-        file.to_str().unwrap(),
         REPO,
+        "--file",
+        file.to_str().unwrap(),
         "--prune",
         "--no-prune",
     ]));
@@ -366,8 +400,12 @@ fn diff_reports_invalid_canonical_file_precisely() {
         "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"},\
           {\"name\": \"BUG\", \"color\": \"0075ca\", \"description\": \"\"}]",
     );
-    let output =
-        run(&mut isolation.command(&["diff", file.to_str().unwrap(), REPO]));
+    let output = run(&mut isolation.command(&[
+        "diff",
+        REPO,
+        "--file",
+        file.to_str().unwrap(),
+    ]));
     assert_eq!(output.status.code(), Some(2));
     let text = stderr(&output);
     assert!(text.contains("canonical.json"), "{text}");
@@ -388,8 +426,9 @@ fn sync_dry_run_performs_no_mutations() {
     );
     let mut command = isolation.command(&[
         "sync",
-        file.to_str().unwrap(),
         REPO,
+        "--file",
+        file.to_str().unwrap(),
         "--prune",
         "--dry-run",
     ]);
@@ -412,7 +451,7 @@ fn sync_without_token_fails_cleanly_when_non_interactive() {
         "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
     );
     let mut command =
-        isolation.command(&["sync", file.to_str().unwrap(), REPO]);
+        isolation.command(&["sync", REPO, "--file", file.to_str().unwrap()]);
     // stdin is piped (not a terminal) by default in Command::output.
     command.stdin(Stdio::null());
     let output = run(&mut command);
@@ -445,7 +484,7 @@ fn sync_applies_plan_and_exits_zero() {
           \"new\"}]",
     );
     let mut command =
-        isolation.command(&["sync", file.to_str().unwrap(), REPO]);
+        isolation.command(&["sync", REPO, "--file", file.to_str().unwrap()]);
     command.env("LABELDECK_TOKEN", "gh_test_token");
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -551,7 +590,7 @@ fn environment_tokens_are_never_persisted() {
         "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
     );
     let mut command =
-        isolation.command(&["diff", file.to_str().unwrap(), REPO]);
+        isolation.command(&["diff", REPO, "--file", file.to_str().unwrap()]);
     command.env("GITHUB_TOKEN", "gh_env_secret_token");
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -588,7 +627,7 @@ fn token_never_appears_in_error_output() {
         "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
     );
     let mut command =
-        isolation.command(&["diff", file.to_str().unwrap(), REPO]);
+        isolation.command(&["diff", REPO, "--file", file.to_str().unwrap()]);
     command.env("LABELDECK_TOKEN", "gh_super_secret_token_42");
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -621,8 +660,12 @@ fn malformed_config_is_a_clean_error() {
         "canonical.json",
         "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
     );
-    let output =
-        run(&mut isolation.command(&["diff", file.to_str().unwrap(), REPO]));
+    let output = run(&mut isolation.command(&[
+        "diff",
+        REPO,
+        "--file",
+        file.to_str().unwrap(),
+    ]));
     assert_eq!(output.status.code(), Some(2));
     assert!(
         stderr(&output).contains("invalid configuration file"),
@@ -636,8 +679,9 @@ fn missing_canonical_file_is_a_clean_error() {
     let isolation = Isolation::new("nofile");
     let output = run(&mut isolation.command(&[
         "diff",
-        isolation.config_dir.join("absent.json").to_str().unwrap(),
         REPO,
+        "--file",
+        isolation.config_dir.join("absent.json").to_str().unwrap(),
     ]));
     assert_eq!(output.status.code(), Some(2));
     assert!(
@@ -675,7 +719,8 @@ fn no_proxy_bypasses_the_environment_proxy() {
         Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
             .labels_page("[]", None),
     ]);
-    let mut command = isolation.command(&["export", REPO, "--no-proxy"]);
+    let mut command =
+        isolation.command(&["export", REPO, "--file", "-", "--no-proxy"]);
     command.env("HTTP_PROXY", "http://127.0.0.1:9");
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -692,8 +737,9 @@ fn no_proxy_bypasses_the_environment_proxy() {
     ]);
     let mut command = isolation.command(&[
         "diff",
-        file.to_str().unwrap(),
         REPO,
+        "--file",
+        file.to_str().unwrap(),
         "--no-proxy",
     ]);
     command.env("HTTP_PROXY", "http://127.0.0.1:9");
@@ -722,4 +768,155 @@ fn no_proxy_bypasses_the_environment_proxy() {
     let output = child.wait_with_output().unwrap();
     mock.assert_satisfied();
     assert!(output.status.success());
+}
+
+#[test]
+fn export_writes_labels_json_in_the_working_directory_by_default() {
+    let isolation = Isolation::new("export-default");
+    let workdir = isolation.config_dir.clone();
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(
+                &labels_json(&[("bug", "d73a4a", Some("broken"))]),
+                None,
+            ),
+    ]);
+    let mut command = isolation.command(&["export", REPO]);
+    command.current_dir(&workdir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    let written =
+        std::fs::read_to_string(workdir.join("labels.json")).unwrap();
+    assert!(written.contains("\"bug\""));
+    assert!(written.ends_with('\n'));
+
+    // Overwrite protection applies to the default file too.
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page("[]", None),
+    ]);
+    let mut command = isolation.command(&["export", REPO]);
+    command.current_dir(&workdir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("refusing to overwrite"));
+
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page("[]", None),
+    ]);
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&workdir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+}
+
+#[test]
+fn export_rejects_force_with_stdout_file() {
+    let isolation = Isolation::new("export-stdout-force");
+    let output =
+        run(&mut isolation
+            .command(&["export", REPO, "--file", "-", "--force"]));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("cannot be combined"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn export_stdout_mode_is_never_blocked_by_an_existing_labels_json() {
+    let isolation = Isolation::new("export-stdout-clean");
+    std::fs::write(isolation.config_dir.join("labels.json"), "stale").unwrap();
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(&labels_json(&[("bug", "d73a4a", None)]), None),
+    ]);
+    let mut command = isolation.command(&["export", REPO, "--file", "-"]);
+    command.current_dir(&isolation.config_dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("[\n"));
+}
+
+#[test]
+fn diff_reads_labels_json_from_the_working_directory_by_default() {
+    let isolation = Isolation::new("diff-default");
+    std::fs::write(
+        isolation.config_dir.join("labels.json"),
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
+    )
+    .unwrap();
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(&labels_json(&[("bug", "d73a4a", None)]), None),
+    ]);
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&isolation.config_dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout(&output).contains("UNCHANGED bug"));
+}
+
+#[test]
+fn sync_reads_labels_json_from_the_working_directory_by_default() {
+    let isolation = Isolation::new("sync-default");
+    std::fs::write(
+        isolation.config_dir.join("labels.json"),
+        "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]",
+    )
+    .unwrap();
+    let mock = mock_github(vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page("[]", None),
+        Expectation::post(&format!("/repos/{REPO}/labels")).status(201),
+    ]);
+    let mut command = isolation.command(&["sync", REPO]);
+    command
+        .current_dir(&isolation.config_dir)
+        .env("LABELDECK_TOKEN", "gh_test_token");
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stderr(&output).contains("Synchronized"));
+}
+
+#[test]
+fn old_positional_file_syntax_is_rejected_cleanly() {
+    let isolation = Isolation::new("old-syntax");
+    for args in [
+        vec!["diff", "labels.json", REPO],
+        vec!["sync", "labels.json", REPO],
+    ] {
+        let output = run(&mut isolation.command(&args));
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let text = stderr(&output);
+        assert!(
+            text.contains("Usage:") || text.contains("unexpected argument"),
+            "clean usage error expected: {text}"
+        );
+        assert!(!text.contains("panicked"), "{text}");
+    }
+}
+
+#[test]
+fn repository_argument_position_is_consistent_across_commands() {
+    // The OWNER/REPO argument is first for export, diff, and sync, so
+    // the same spec is accepted (and rejected) identically everywhere.
+    let isolation = Isolation::new("repo-position");
+    for command_name in ["export", "diff", "sync"] {
+        let output =
+            run(&mut isolation.command(&[command_name, "not-a-repo"]));
+        assert_eq!(output.status.code(), Some(2), "{command_name}");
+        assert!(
+            stderr(&output).contains("OWNER/REPO"),
+            "{command_name}: {}",
+            stderr(&output)
+        );
+    }
 }

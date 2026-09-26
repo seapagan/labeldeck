@@ -7,13 +7,16 @@ use crate::error::Result;
 use crate::plan::{self, Plan};
 
 pub fn run(
-    file: &std::path::Path,
     repo: &str,
+    file: Option<&std::path::PathBuf>,
     cli_prune: Option<bool>,
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
-    let canonical = read_canonical(file)?;
+    let path = file.map(std::path::PathBuf::as_path).unwrap_or_else(|| {
+        std::path::Path::new(crate::cli::DEFAULT_LABELS_FILE)
+    });
+    let canonical = read_canonical(path)?;
     let config_dir = crate::commands::config_dir()?;
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);

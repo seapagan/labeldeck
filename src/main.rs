@@ -8,28 +8,28 @@ fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
         Command::Export { repo, file, force } => {
-            commands::export::run(&repo, &file, force, cli.no_proxy)
+            commands::export::run(&repo, file.as_ref(), force, cli.no_proxy)
         }
         Command::Diff {
-            file,
             repo,
+            file,
             prune,
             no_prune,
         } => commands::diff::run(
-            &file,
             &repo,
+            file.as_ref(),
             labeldeck::cli::prune_override(prune, no_prune),
             cli.no_proxy,
         ),
         Command::Sync {
-            file,
             repo,
+            file,
             prune,
             no_prune,
             dry_run,
         } => commands::sync::run(
-            &file,
             &repo,
+            file.as_ref(),
             labeldeck::cli::prune_override(prune, no_prune),
             dry_run,
             cli.no_proxy,
