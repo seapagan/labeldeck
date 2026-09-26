@@ -7,3 +7,4 @@ pub mod canonical;
 pub mod github;
 pub mod labels;
 pub mod plan;
+pub mod sync;

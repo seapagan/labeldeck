@@ -171,7 +171,7 @@ impl GitHubClient {
         let body = response
             .body_mut()
             .read_to_string()
-            .map_err(|e| transport_error(e.into()))?;
+            .map_err(|e| transport_error(e))?;
         Ok(ApiReply::new(response, body))
     }
 
@@ -192,7 +192,7 @@ impl GitHubClient {
         let body = response
             .body_mut()
             .read_to_string()
-            .map_err(|e| transport_error(e.into()))?;
+            .map_err(|e| transport_error(e))?;
         Ok(ApiReply::new(response, body))
     }
 
@@ -204,7 +204,7 @@ impl GitHubClient {
         let body = response
             .body_mut()
             .read_to_string()
-            .map_err(|e| transport_error(e.into()))?;
+            .map_err(|e| transport_error(e))?;
         Ok(ApiReply::new(response, body))
     }
 
