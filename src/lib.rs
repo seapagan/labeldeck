@@ -5,7 +5,10 @@
 
 pub mod auth;
 pub mod canonical;
+pub mod cli;
+pub mod commands;
 pub mod config;
+pub mod error;
 pub mod github;
 pub mod labels;
 pub mod plan;

@@ -111,11 +111,11 @@ pub fn execute_with_pause(
     for update in &plan.updates {
         let description = format!(
             "update label {:?} in place (colour/description)",
-            update.current_name
+            update.current_name()
         );
         reporter.operation(&description);
         if !attempt(
-            client.update_label(repo, &update.current_name, &update.desired),
+            client.update_label(repo, update.current_name(), &update.desired),
             &mut first_mutation,
             pause,
             &mut outcome,
@@ -189,11 +189,17 @@ fn skip_remaining_updates(outcome: &mut SyncOutcome, plan: &Plan) {
     for update in &plan.updates {
         outcome
             .skipped
-            .push(format!("update label {:?}", update.current_name));
+            .push(format!("update label {:?}", update.current_name()));
     }
     for deletion in &plan.deletes {
         outcome
             .skipped
             .push(format!("delete label {:?}", deletion.name));
+    }
+}
+
+impl<R: Reporter> Reporter for &mut R {
+    fn operation(&mut self, description: &str) {
+        (**self).operation(description);
     }
 }

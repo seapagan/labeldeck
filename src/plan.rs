@@ -10,11 +10,18 @@ use crate::labels::Label;
 /// An in-place update of an existing remote label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Update {
-    /// The label name exactly as it exists on the target repository.
+    /// The label exactly as it exists on the target repository.
     /// Updates never rename, so issue/PR associations are preserved.
-    pub current_name: String,
+    pub current: Label,
     /// The desired colour and description from the canonical set.
     pub desired: Label,
+}
+
+impl Update {
+    /// The name updates are addressed to (the remote spelling).
+    pub fn current_name(&self) -> &str {
+        &self.current.name
+    }
 }
 
 /// A deletion of a target-only label. Only ever planned when pruning.
@@ -22,8 +29,6 @@ pub struct Update {
 pub struct Deletion {
     pub name: String,
 }
-
-/// The complete set of operations implied by a canonical/remote pair.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Plan {
     /// Canonical labels missing from the target, sorted by name.
@@ -71,7 +76,7 @@ pub fn plan(canonical: &[Label], remote: &[Label], prune: bool) -> Plan {
                     || existing.description != want.description
                 {
                     result.updates.push(Update {
-                        current_name: existing.name.clone(),
+                        current: (*existing).clone(),
                         desired: want.clone(),
                     });
                 } else {
@@ -98,7 +103,7 @@ pub fn plan(canonical: &[Label], remote: &[Label], prune: bool) -> Plan {
     result.creates.sort_by(|a, b| a.name.cmp(&b.name));
     result
         .updates
-        .sort_by(|a, b| a.current_name.cmp(&b.current_name));
+        .sort_by(|a, b| a.current_name().cmp(b.current_name()));
     result.deletes.sort_by(|a, b| a.name.cmp(&b.name));
     result.unchanged.sort();
     result.retained.sort();
@@ -172,9 +177,9 @@ mod tests {
         ];
         let result = plan(&canonical, &remote, false);
         assert_eq!(result.updates.len(), 2);
-        assert_eq!(result.updates[0].current_name, "bug");
+        assert_eq!(result.updates[0].current_name(), "bug");
         assert_eq!(result.updates[0].desired.color.as_str(), "ff0000");
-        assert_eq!(result.updates[1].current_name, "docs");
+        assert_eq!(result.updates[1].current_name(), "docs");
     }
 
     #[test]
@@ -182,7 +187,7 @@ mod tests {
         let canonical = vec![label("BUG", "ff0000", "broken badly")];
         let remote = vec![label("bug", "d73a4a", "broken")];
         let result = plan(&canonical, &remote, false);
-        assert_eq!(result.updates[0].current_name, "bug");
+        assert_eq!(result.updates[0].current_name(), "bug");
         assert_eq!(result.updates[0].desired.name, "BUG");
     }
 
