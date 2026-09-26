@@ -1203,3 +1203,95 @@ fn plain_export_never_modifies_an_existing_global_deck() {
         "plain export must never touch the global deck"
     );
 }
+
+// ---------------------------------------------------------------------
+// sync --dry-run follow-up command suggestion.
+
+fn dry_run_list() -> Vec<Expectation> {
+    remote_page(&[("docs", "0075ca", None)])
+}
+
+#[test]
+fn dry_run_suggestion_uses_default_form_for_local_deck() {
+    let isolation = Isolation::new("suggest-local");
+    let dir = workdir("suggest-local");
+    std::fs::write(dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    let mock = mock_github(dry_run_list());
+    let mut command =
+        isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    assert!(
+        text.contains(
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --prune"
+        ),
+        "{text}"
+    );
+    assert!(
+        !text.contains("labels.json labeldeck"),
+        "no positional file syntax in the suggestion: {text}"
+    );
+}
+
+#[test]
+fn dry_run_suggestion_hides_the_resolved_global_path() {
+    let isolation = Isolation::new("suggest-global");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("suggest-global"); // no local deck
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&["sync", REPO, "--dry-run"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    assert!(
+        text.contains(
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --no-prune"
+        ),
+        "{text}"
+    );
+    assert!(
+        !text.contains(isolation.config_dir.to_string_lossy().as_ref()),
+        "the resolved global path must not be exposed: {text}"
+    );
+}
+
+#[test]
+fn dry_run_suggestion_repeats_explicit_file() {
+    let isolation = Isolation::new("suggest-explicit");
+    let dir = workdir("suggest-explicit");
+    std::fs::write(dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    std::fs::write(dir.join("custom.json"), LOCAL_DECK).unwrap();
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        "custom.json",
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    assert!(
+        text.contains(
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file custom.json --prune"
+        ),
+        "{text}"
+    );
+}

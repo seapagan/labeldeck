@@ -6,6 +6,7 @@ use crate::commands::{
     remote_labels, repo_spec, resolve_token,
 };
 use crate::error::Result;
+use crate::github::RepoSpec;
 use crate::plan;
 use crate::sync as sync_engine;
 
@@ -18,11 +19,11 @@ pub fn run(
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = config_dir()?;
-    let deck_path = crate::deck::resolve_read_path(
+    let selection = crate::deck::resolve_read_selection(
         file.map(std::path::PathBuf::as_path),
         &config_dir,
     )?;
-    let canonical = read_canonical(&deck_path)?;
+    let canonical = read_canonical(selection.path())?;
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
 
@@ -36,12 +37,8 @@ pub fn run(
         diff::print_plan(&result);
         eprintln!("{}", diff::summarize(&result));
         eprintln!(
-            "Run again without --dry-run to apply: labeldeck sync {} \
-             {}/{} {}",
-            deck_path.display(),
-            repo.owner,
-            repo.name,
-            if prune { "--prune" } else { "--no-prune" },
+            "Run again without --dry-run to apply: {}",
+            follow_up_command(&repo, file, prune),
         );
         return Ok(0);
     }
@@ -100,5 +97,61 @@ struct StderrReporter;
 impl sync_engine::Reporter for StderrReporter {
     fn operation(&mut self, description: &str) {
         eprintln!("labeldeck: {description}...");
+    }
+}
+
+/// The "run again" suggestion shown after `--dry-run`, preserving how
+/// the deck was selected: explicit `--file` paths are repeated
+/// verbatim; automatic selection (local or global default) prints the
+/// clean default form without exposing the resolved global path.
+fn follow_up_command(
+    repo: &RepoSpec,
+    file: Option<&std::path::PathBuf>,
+    prune: bool,
+) -> String {
+    let prune_flag = if prune { "--prune" } else { "--no-prune" };
+    match file {
+        Some(path) => format!(
+            "labeldeck sync {}/{} --file {} {prune_flag}",
+            repo.owner,
+            repo.name,
+            path.display()
+        ),
+        None => {
+            format!("labeldeck sync {}/{} {prune_flag}", repo.owner, repo.name)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_selection_suggests_the_clean_default_form() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        assert_eq!(
+            follow_up_command(&repo, None, true),
+            "labeldeck sync octocat/hello-world --prune"
+        );
+        assert_eq!(
+            follow_up_command(&repo, None, false),
+            "labeldeck sync octocat/hello-world --no-prune"
+        );
+    }
+
+    #[test]
+    fn explicit_selection_repeats_the_file_argument() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        let path = std::path::PathBuf::from("custom.json");
+        assert_eq!(
+            follow_up_command(&repo, Some(&path), true),
+            "labeldeck sync octocat/hello-world --file custom.json --prune"
+        );
+        assert_eq!(
+            follow_up_command(&repo, Some(&path), false),
+            "labeldeck sync octocat/hello-world --file custom.json \
+             --no-prune"
+        );
     }
 }
