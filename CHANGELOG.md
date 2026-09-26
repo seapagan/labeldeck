@@ -47,5 +47,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept out of `config.toml`.
 - One-second pause between mutative requests per GitHub's
   secondary-rate-limit guidance.
-
-[Unreleased]: https://github.com/seapagan/labeldeck/compare/v0.1.0...HEAD
