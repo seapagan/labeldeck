@@ -36,10 +36,7 @@ pub fn run(
         eprintln!("Dry run: no changes were made.");
         diff::print_plan(&result);
         eprintln!("{}", diff::summarize(&result));
-        eprintln!(
-            "Run again without --dry-run to apply: {}",
-            follow_up_command(&repo, file, prune),
-        );
+        eprintln!("{}", follow_up_command(&repo, file, prune));
         return Ok(0);
     }
 
@@ -100,10 +97,35 @@ impl sync_engine::Reporter for StderrReporter {
     }
 }
 
-/// The "run again" suggestion shown after `--dry-run`, preserving how
-/// the deck was selected: explicit `--file` paths are repeated
-/// verbatim; automatic selection (local or global default) prints the
-/// clean default form without exposing the resolved global path.
+/// Whether a path can appear as a bare argument in a suggested command
+/// without any risk of changing argument boundaries or meaning.
+///
+/// Conservatively allowlisted: plain ASCII letters, digits, `.`, `_`,
+/// `-`, and `/` (a path separator on every supported platform), and it
+/// must not be empty or begin with `-` (which would read as a flag).
+/// Anything else — spaces, quotes, backslashes, shell
+/// metacharacters, non-ASCII — is rendered in the structured form
+/// instead, because quoting rules differ between POSIX shells,
+/// PowerShell, and CMD and no single quoted form is safe everywhere.
+fn is_plain_path_token(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('-')
+        && path.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'.' | b'_' | b'-' | b'/')
+        })
+}
+
+/// The "run again" guidance shown after `--dry-run`, preserving how the
+/// deck was selected.
+///
+/// Automatically selected decks (local default or global fallback)
+/// print the clean default command without exposing the resolved
+/// global path. An explicit `--file` prints the same concise form only
+/// when the path is provably safe as a bare argument; otherwise the
+/// guidance switches to a structured, unambiguous form rather than
+/// displaying a command that would split or change meaning when
+/// copy/pasted into any shell.
 fn follow_up_command(
     repo: &RepoSpec,
     file: Option<&std::path::PathBuf>,
@@ -111,14 +133,29 @@ fn follow_up_command(
 ) -> String {
     let prune_flag = if prune { "--prune" } else { "--no-prune" };
     match file {
-        Some(path) => format!(
-            "labeldeck sync {}/{} --file {} {prune_flag}",
-            repo.owner,
-            repo.name,
-            path.display()
+        None => format!(
+            "Run again without --dry-run to apply: labeldeck sync {}/{} \
+             {prune_flag}",
+            repo.owner, repo.name
         ),
-        None => {
-            format!("labeldeck sync {}/{} {prune_flag}", repo.owner, repo.name)
+        Some(path) => {
+            let rendered = path.to_string_lossy();
+            if is_plain_path_token(&rendered) {
+                format!(
+                    "Run again without --dry-run to apply: labeldeck sync \
+                     {}/{} --file {} {prune_flag}",
+                    repo.owner, repo.name, rendered
+                )
+            } else {
+                format!(
+                    "Run again without --dry-run, using:\n  repository: \
+                     {}/{}\n  file:       {}\n  pruning:    {}",
+                    repo.owner,
+                    repo.name,
+                    rendered,
+                    if prune { "enabled" } else { "disabled" }
+                )
+            }
         }
     }
 }
@@ -132,12 +169,58 @@ mod tests {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
         assert_eq!(
             follow_up_command(&repo, None, true),
-            "labeldeck sync octocat/hello-world --prune"
+            "Run again without --dry-run to apply: \
+             labeldeck sync octocat/hello-world --prune"
         );
         assert_eq!(
             follow_up_command(&repo, None, false),
-            "labeldeck sync octocat/hello-world --no-prune"
+            "Run again without --dry-run to apply: \
+             labeldeck sync octocat/hello-world --no-prune"
         );
+    }
+
+    #[test]
+    fn awkward_paths_never_render_a_command_form() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        for awkward in [
+            "my labels.json",
+            "it's.json",
+            "say \"hi\".json",
+            "C:\\Users\\me\\labels.json",
+            "a;b&c.json",
+            "$HOME/labels.json",
+            "-flag-like.json",
+            "labels*.json",
+        ] {
+            let path = std::path::PathBuf::from(awkward);
+            let guidance = follow_up_command(&repo, Some(&path), true);
+            assert!(
+                !guidance.contains("labeldeck sync"),
+                "{awkward:?} must not be shown as a copy/paste command: \
+                 {guidance}"
+            );
+            assert!(
+                guidance.contains(awkward),
+                "{awkward:?} must appear verbatim: {guidance}"
+            );
+            assert!(guidance.contains("repository: octocat/hello-world"));
+            assert!(guidance.contains("file:"));
+            assert!(guidance.contains("pruning:    enabled"));
+        }
+    }
+
+    #[test]
+    fn plain_explicit_paths_keep_the_command_form() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        for plain in ["labels-alt.json", "decks/main.json", "v1.2-beta_labels"]
+        {
+            let path = std::path::PathBuf::from(plain);
+            let guidance = follow_up_command(&repo, Some(&path), false);
+            assert!(
+                guidance.contains(&format!("--file {plain} --no-prune")),
+                "{plain}: {guidance}"
+            );
+        }
     }
 
     #[test]
@@ -146,12 +229,13 @@ mod tests {
         let path = std::path::PathBuf::from("custom.json");
         assert_eq!(
             follow_up_command(&repo, Some(&path), true),
-            "labeldeck sync octocat/hello-world --file custom.json --prune"
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file custom.json --prune"
         );
         assert_eq!(
             follow_up_command(&repo, Some(&path), false),
-            "labeldeck sync octocat/hello-world --file custom.json \
-             --no-prune"
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file custom.json --no-prune"
         );
     }
 }

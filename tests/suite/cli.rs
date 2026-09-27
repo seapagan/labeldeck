@@ -1302,7 +1302,8 @@ fn dangling_local_deck_symlink_does_not_fall_back_to_global() {
     use std::os::unix::fs::symlink;
     let isolation = Isolation::new("dangling-local");
     // A perfectly valid global deck exists...
-    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
     let dir = workdir("dangling-local");
     // ...but the local entry is an authoritative (if dangling) symlink.
     symlink("/definitely/not/here", dir.join("labels.json")).unwrap();
@@ -1320,4 +1321,37 @@ fn dangling_local_deck_symlink_does_not_fall_back_to_global() {
         text.contains("could not read labels.json"),
         "error must refer to the local deck: {text}"
     );
+}
+
+#[test]
+fn dry_run_suggestion_renders_awkward_paths_safely() {
+    let isolation = Isolation::new("suggest-awkward");
+    let dir = workdir("suggest-awkward");
+    let awkward = dir.join("my labels.json");
+    std::fs::write(&awkward, GLOBAL_DECK).unwrap();
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        awkward.to_str().unwrap(),
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    // The path itself is not plain, so no command form may be shown...
+    assert!(
+        !text.contains("labeldeck sync"),
+        "awkward path must not be rendered as a command: {text}"
+    );
+    // ...but the exact path and settings must be.
+    assert!(text.contains("file:       "), "{text}");
+    assert!(text.contains("my labels.json"), "{text}");
+    assert!(text.contains("repository: octocat/hello-world"), "{text}");
+    assert!(text.contains("pruning:    enabled"), "{text}");
 }
