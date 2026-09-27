@@ -1241,7 +1241,7 @@ fn dry_run_list() -> Vec<Expectation> {
 }
 
 #[test]
-fn dry_run_suggestion_uses_default_form_for_local_deck() {
+fn dry_run_suggestion_pins_the_selected_local_deck() {
     let isolation = Isolation::new("suggest-local");
     let dir = workdir("suggest-local");
     std::fs::write(dir.join("labels.json"), GLOBAL_DECK).unwrap();
@@ -1253,24 +1253,22 @@ fn dry_run_suggestion_uses_default_form_for_local_deck() {
     mock.assert_satisfied();
     assert_eq!(output.status.code(), Some(0));
     let text = stderr(&output);
+    // The automatically selected local deck is pinned explicitly, so
+    // the rerun cannot re-resolve precedence.
     assert!(
         text.contains(
             "Run again without --dry-run to apply: labeldeck sync \
-             octocat/hello-world --prune"
+             octocat/hello-world --file labels.json --prune"
         ),
         "{text}"
-    );
-    assert!(
-        !text.contains("labels.json labeldeck"),
-        "no positional file syntax in the suggestion: {text}"
     );
 }
 
 #[test]
-fn dry_run_suggestion_hides_the_resolved_global_path() {
+fn dry_run_suggestion_pins_the_resolved_global_path() {
     let isolation = Isolation::new("suggest-global");
-    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
-        .unwrap();
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, GLOBAL_DECK).unwrap();
     let dir = workdir("suggest-global"); // no local deck
 
     let mock = mock_github(dry_run_list());
@@ -1280,17 +1278,55 @@ fn dry_run_suggestion_hides_the_resolved_global_path() {
     mock.assert_satisfied();
     assert_eq!(output.status.code(), Some(0));
     let text = stderr(&output);
+    // The resolved global deck is pinned exactly. Whether it renders
+    // as a bare argument or the structured form depends on the
+    // platform's temporary-directory path; both must carry the exact
+    // path so the rerun cannot re-resolve precedence.
+    let command_form = format!("--file {} --no-prune", global.display());
+    let structured_form = format!("file:       {:?}", global);
     assert!(
-        text.contains(
-            "Run again without --dry-run to apply: labeldeck sync \
-             octocat/hello-world --no-prune"
-        ),
-        "{text}"
+        text.contains(&command_form) || text.contains(&structured_form),
+        "guidance must pin the exact global deck path: {text}"
     );
-    assert!(
-        !text.contains(isolation.config_dir.to_string_lossy().as_ref()),
-        "the resolved global path must not be exposed: {text}"
-    );
+}
+
+#[test]
+fn global_backed_dry_run_guidance_stays_pinned_when_local_deck_appears() {
+    let isolation = Isolation::new("suggest-global-race");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, GLOBAL_DECK).unwrap();
+    let dir = workdir("suggest-global-race"); // no local deck yet
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+
+    // A local deck appears between the dry run and the rerun.
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+
+    // Following the pinned guidance (--file <the global deck used by
+    // the dry run, here in dry-run form to stay read-only) still
+    // reads the global deck: the remote matches it exactly, so the
+    // local deck's "bug" label must never surface in the plan.
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        global.to_str().unwrap(),
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    assert!(!text.contains("bug"), "local deck leaked in: {text}");
+    assert!(!text.contains("CREATE"), "plan must be empty: {text}");
 }
 
 #[test]

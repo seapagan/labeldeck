@@ -36,7 +36,7 @@ pub fn run(
         eprintln!("Dry run: no changes were made.");
         diff::print_plan(&result);
         eprintln!("{}", diff::summarize(&result));
-        eprintln!("{}", follow_up_command(&repo, file, prune));
+        eprintln!("{}", follow_up_command(&repo, &selection, prune));
         return Ok(0);
     }
 
@@ -116,78 +116,98 @@ fn is_plain_path_token(path: &str) -> bool {
         })
 }
 
-/// The "run again" guidance shown after `--dry-run`, preserving how the
-/// deck was selected.
+/// The "run again" guidance shown after `--dry-run`, pinned to the
+/// exact deck the dry run used.
 ///
-/// Automatically selected decks (local default or global fallback)
-/// print the clean default command without exposing the resolved
-/// global path. An explicit `--file` prints the same concise form only
-/// when the path is provably safe as a bare argument; otherwise the
-/// guidance switches to a structured, unambiguous form rather than
-/// displaying a command that would split or change meaning when
-/// copy/pasted into any shell.
+/// The rerun repeats the selected deck as an explicit `--file`
+/// argument so it can never re-resolve local/global precedence, which
+/// may have changed since the dry run read its deck: a local
+/// `labels.json` appearing after a global-backed dry run must not
+/// silently change which deck gets applied. All three selection kinds
+/// ([`DeckSelection::Explicit`], [`DeckSelection::Local`],
+/// [`DeckSelection::Global`]) therefore pin their exact resolved path.
+///
+/// A pinned path prints as a bare `--file` argument only when it is
+/// provably safe as such; otherwise the guidance switches to a
+/// structured, unambiguous form rather than displaying a command that
+/// would split or change meaning when copy/pasted into any shell.
 fn follow_up_command(
     repo: &RepoSpec,
-    file: Option<&std::path::PathBuf>,
+    selection: &crate::deck::DeckSelection,
     prune: bool,
 ) -> String {
+    let path = selection.path();
     let prune_flag = if prune { "--prune" } else { "--no-prune" };
-    match file {
-        None => format!(
-            "Run again without --dry-run to apply: labeldeck sync {}/{} \
-             {prune_flag}",
-            repo.owner, repo.name
-        ),
-        Some(path) => {
-            // Lossy text decides *safety* (non-UTF-8 paths contain
-            // replacement characters and are never plain tokens), but
-            // the structured form renders the path with Debug-style
-            // escaping so newlines, tabs, control characters, and
-            // non-UTF-8 bytes stay visible as escapes instead of
-            // visually restructuring the diagnostic.
-            if is_plain_path_token(&path.to_string_lossy()) {
-                format!(
-                    "Run again without --dry-run to apply: labeldeck sync \
-                     {}/{} --file {} {prune_flag}",
-                    repo.owner,
-                    repo.name,
-                    path.display()
-                )
-            } else {
-                format!(
-                    "Run again without --dry-run, using:\n  repository: \
-                     {}/{}\n  file:       {:?}\n  pruning:    {}",
-                    repo.owner,
-                    repo.name,
-                    path,
-                    if prune { "enabled" } else { "disabled" }
-                )
-            }
-        }
+    // Lossy text decides *safety* (non-UTF-8 paths contain
+    // replacement characters and are never plain tokens), but
+    // the structured form renders the path with Debug-style
+    // escaping so newlines, tabs, control characters, and
+    // non-UTF-8 bytes stay visible as escapes instead of
+    // visually restructuring the diagnostic.
+    if is_plain_path_token(&path.to_string_lossy()) {
+        format!(
+            "Run again without --dry-run to apply: labeldeck sync \
+             {}/{} --file {} {prune_flag}",
+            repo.owner,
+            repo.name,
+            path.display()
+        )
+    } else {
+        format!(
+            "Run again without --dry-run, using:\n  repository: \
+             {}/{}\n  file:       {:?}\n  pruning:    {}",
+            repo.owner,
+            repo.name,
+            path,
+            if prune { "enabled" } else { "disabled" }
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deck::DeckSelection;
 
     #[test]
-    fn automatic_selection_suggests_the_clean_default_form() {
+    fn local_selection_pins_the_local_deck() {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        let selection =
+            DeckSelection::Local(std::path::PathBuf::from("labels.json"));
         assert_eq!(
-            follow_up_command(&repo, None, true),
-            "Run again without --dry-run to apply: \
-             labeldeck sync octocat/hello-world --prune"
+            follow_up_command(&repo, &selection, true),
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file labels.json --prune"
         );
         assert_eq!(
-            follow_up_command(&repo, None, false),
-            "Run again without --dry-run to apply: \
-             labeldeck sync octocat/hello-world --no-prune"
+            follow_up_command(&repo, &selection, false),
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file labels.json --no-prune"
         );
     }
 
     #[test]
-    fn awkward_paths_never_render_a_command_form() {
+    fn global_selection_pins_the_resolved_global_path() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        let selection = DeckSelection::Global(std::path::PathBuf::from(
+            "/home/me/.config/labeldeck/labels.json",
+        ));
+        assert_eq!(
+            follow_up_command(&repo, &selection, true),
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file \
+             /home/me/.config/labeldeck/labels.json --prune"
+        );
+        assert_eq!(
+            follow_up_command(&repo, &selection, false),
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file \
+             /home/me/.config/labeldeck/labels.json --no-prune"
+        );
+    }
+
+    #[test]
+    fn awkward_selected_paths_never_render_a_command_form() {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
         for awkward in [
             "my labels.json",
@@ -203,23 +223,31 @@ mod tests {
             "con\x07trol.json",
             "café.json",
         ] {
-            let path = std::path::PathBuf::from(awkward);
-            let guidance = follow_up_command(&repo, Some(&path), true);
-            assert!(
-                !guidance.contains("labeldeck sync"),
-                "{awkward:?} must not be shown as a copy/paste command: \
-                 {guidance}"
-            );
-            // The diagnostic form is the path's own Debug rendering, so
-            // it stays identifiable while every control character and
-            // backslash remains visibly escaped.
-            assert!(
-                guidance.contains(&format!("{:?}", path)),
-                "{awkward:?} must appear in escaped debug form: {guidance}"
-            );
-            assert!(guidance.contains("repository: octocat/hello-world"));
-            assert!(guidance.contains("file:"));
-            assert!(guidance.contains("pruning:    enabled"));
+            // Explicit and globally selected decks alike must render
+            // the selected path safely.
+            for selection in [
+                DeckSelection::Explicit(std::path::PathBuf::from(awkward)),
+                DeckSelection::Global(std::path::PathBuf::from(awkward)),
+            ] {
+                let guidance = follow_up_command(&repo, &selection, true);
+                assert!(
+                    !guidance.contains("labeldeck sync"),
+                    "{awkward:?} ({selection:?}) must not be shown as a \
+                     copy/paste command: {guidance}"
+                );
+                // The diagnostic form is the path's own Debug
+                // rendering, so it stays identifiable while every
+                // control character and backslash remains visibly
+                // escaped.
+                assert!(
+                    guidance
+                        .contains(&format!("{:?}", selection.path())),
+                    "{awkward:?} must appear in escaped debug form: {guidance}"
+                );
+                assert!(guidance.contains("repository: octocat/hello-world"));
+                assert!(guidance.contains("file:"));
+                assert!(guidance.contains("pruning:    enabled"));
+            }
         }
     }
 
@@ -227,17 +255,19 @@ mod tests {
     fn embedded_newlines_and_tabs_do_not_restructure_the_guidance() {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
         for awkward in ["we\nird.json", "ta\tb.json", "con\x07trol.json"] {
-            let path = std::path::PathBuf::from(awkward);
-            let guidance = follow_up_command(&repo, Some(&path), false);
-            // The file field stays one field on one line, ending in the
-            // escaped debug form, and no raw control character leaks.
+            let selection =
+                DeckSelection::Explicit(std::path::PathBuf::from(awkward));
+            let guidance = follow_up_command(&repo, &selection, false);
+            // The file field stays one field on one line, ending in
+            // the escaped debug form, and no raw control character
+            // leaks.
             let file_line = guidance
                 .split('\n')
                 .find(|line| line.starts_with("  file:"))
                 .expect("file field");
             assert_eq!(
                 file_line,
-                format!("  file:       {:?}", path),
+                format!("  file:       {:?}", selection.path()),
                 "{awkward:?}"
             );
             assert!(guidance.contains("pruning:    disabled"));
@@ -252,7 +282,8 @@ mod tests {
         let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
             b"bad\xff.json",
         ));
-        let guidance = follow_up_command(&repo, Some(&path), true);
+        let guidance =
+            follow_up_command(&repo, &DeckSelection::Explicit(path), true);
         assert!(!guidance.contains("labeldeck sync"));
         // The invalid byte is shown as an escape, never silently
         // rendered as a lossy replacement character.
@@ -269,8 +300,9 @@ mod tests {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
         for plain in ["labels-alt.json", "decks/main.json", "v1.2-beta_labels"]
         {
-            let path = std::path::PathBuf::from(plain);
-            let guidance = follow_up_command(&repo, Some(&path), false);
+            let selection =
+                DeckSelection::Explicit(std::path::PathBuf::from(plain));
+            let guidance = follow_up_command(&repo, &selection, false);
             assert!(
                 guidance.contains(&format!("--file {plain} --no-prune")),
                 "{plain}: {guidance}"
@@ -281,14 +313,15 @@ mod tests {
     #[test]
     fn explicit_selection_repeats_the_file_argument() {
         let repo = RepoSpec::parse("octocat/hello-world").unwrap();
-        let path = std::path::PathBuf::from("custom.json");
+        let selection =
+            DeckSelection::Explicit(std::path::PathBuf::from("custom.json"));
         assert_eq!(
-            follow_up_command(&repo, Some(&path), true),
+            follow_up_command(&repo, &selection, true),
             "Run again without --dry-run to apply: labeldeck sync \
              octocat/hello-world --file custom.json --prune"
         );
         assert_eq!(
-            follow_up_command(&repo, Some(&path), false),
+            follow_up_command(&repo, &selection, false),
             "Run again without --dry-run to apply: labeldeck sync \
              octocat/hello-world --file custom.json --no-prune"
         );
