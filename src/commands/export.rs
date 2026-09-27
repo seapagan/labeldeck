@@ -58,7 +58,7 @@ pub fn run(
         crate::auth::ensure_config_dir(&config_dir).map_err(|e| {
             Error::Io {
                 context: format!(
-                    "could not create configuration directory {}",
+                    "could not create or secure configuration directory {}",
                     config_dir.display()
                 ),
                 message: e.to_string(),
