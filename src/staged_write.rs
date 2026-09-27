@@ -146,39 +146,72 @@ pub(crate) fn staged_write(
 ) -> Result<WriteOutcome> {
     let effective = effective_destination(dest, force)?;
     let dir = staging_dir(&effective);
-    let (mut file, staged) = create_staging_file(dir, dest)?;
-
-    fault(Stage::Contents).map_err(|e| write_error(dest, e))?;
-    file.write_all(bytes).map_err(|e| write_error(dest, e))?;
-    file.flush().map_err(|e| write_error(dest, e))?;
-    file.sync_all().map_err(|e| write_error(dest, e))?;
+    let (file, staged) = create_staging_file(dir, dest)?;
+    stage_contents(file, bytes, dest, fault)?;
 
     // COMMIT POINT: from here on, the effective destination holds the
     // new deck.
-    fault(Stage::Commit).map_err(|e| write_error(dest, e))?;
-    if force {
-        std::fs::rename(&staged.path, &effective)
-            .map_err(|e| write_error(dest, e))?;
-    } else {
-        match renamore::rename_exclusive(&staged.path, &effective) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(Error::OutputExists {
-                    path: dest.to_path_buf(),
-                });
-            }
-            Err(e) => return Err(write_error(dest, e)),
-        }
-    }
+    commit_staged(&staged, &effective, dest, force, fault)?;
 
     // POST-COMMIT: the deck is installed; a failing durability sync
     // must not present the export as though it never happened.
-    let durability =
-        fault(Stage::DirectorySync).and_then(|()| sync_directory(dir));
-    Ok(match durability {
+    Ok(post_commit_outcome(dir, fault))
+}
+
+/// PRE-COMMIT: write the complete replacement into the staging file
+/// and make it durable before any destination is touched.
+fn stage_contents(
+    mut file: std::fs::File,
+    bytes: &[u8],
+    dest: &Path,
+    fault: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+) -> Result<()> {
+    fault(Stage::Contents).map_err(|e| write_error(dest, e))?;
+    file.write_all(bytes).map_err(|e| write_error(dest, e))?;
+    file.flush().map_err(|e| write_error(dest, e))?;
+    file.sync_all().map_err(|e| write_error(dest, e))
+}
+
+/// COMMIT: install the staged file at the effective destination.
+///
+/// `force` atomically replaces the destination; otherwise the
+/// exclusive rename installs only if the destination is absent, and
+/// an occupied destination — however it came to exist — becomes
+/// [`Error::OutputExists`] with the destination untouched.
+fn commit_staged(
+    staged: &Staged,
+    effective: &Path,
+    dest: &Path,
+    force: bool,
+    fault: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+) -> Result<()> {
+    fault(Stage::Commit).map_err(|e| write_error(dest, e))?;
+    if force {
+        return std::fs::rename(&staged.path, effective)
+            .map_err(|e| write_error(dest, e));
+    }
+    match renamore::rename_exclusive(&staged.path, effective) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(Error::OutputExists {
+                path: dest.to_path_buf(),
+            })
+        }
+        Err(e) => Err(write_error(dest, e)),
+    }
+}
+
+/// POST-COMMIT: report whether the installed name's durability was
+/// confirmed. A sync that is attempted and fails is not a failed
+/// export, so it never rolls anything back.
+fn post_commit_outcome(
+    dir: &Path,
+    fault: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+) -> WriteOutcome {
+    match fault(Stage::DirectorySync).and_then(|()| sync_directory(dir)) {
         Ok(()) => WriteOutcome::Durable,
         Err(e) => WriteOutcome::DurabilityUnconfirmed(e),
-    })
+    }
 }
 
 /// Resolve the path the commit will actually act on.
@@ -218,10 +251,24 @@ fn effective_destination<'a>(
     if !force {
         return Ok(std::borrow::Cow::Borrowed(dest));
     }
-    match std::fs::symlink_metadata(dest) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+    match examine_destination(dest)? {
+        None => Ok(std::borrow::Cow::Borrowed(dest)),
+        Some(meta) if meta.file_type().is_symlink() => {
+            Ok(std::borrow::Cow::Owned(symlink_target(dest)?))
+        }
+        Some(meta) => {
+            ensure_replaceable(dest, dest, &meta)?;
             Ok(std::borrow::Cow::Borrowed(dest))
         }
+    }
+}
+
+/// Examine the destination entry itself, without following symlinks.
+/// `None` means the destination is absent.
+fn examine_destination(dest: &Path) -> Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(dest) {
+        Ok(meta) => Ok(Some(meta)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Io {
             context: format!(
                 "could not examine {} while preparing the export",
@@ -229,61 +276,64 @@ fn effective_destination<'a>(
             ),
             message: e.to_string(),
         }),
-        Ok(meta) if meta.file_type().is_symlink() => {
-            let target =
-                std::fs::canonicalize(dest).map_err(|e| Error::Io {
-                    context: format!(
-                        "destination {} is a symbolic link whose target \
-                         could not be resolved",
-                        dest.display()
-                    ),
-                    message: e.to_string(),
-                })?;
-            match std::fs::symlink_metadata(&target) {
-                Ok(t) if t.is_dir() => Err(Error::Io {
-                    context: format!(
-                        "destination {} resolves to {} which is a \
-                         directory",
-                        dest.display(),
-                        target.display()
-                    ),
-                    message: "a deck file cannot replace a directory"
-                        .to_string(),
-                }),
-                Ok(t) if !t.is_file() => Err(Error::Io {
-                    context: format!(
-                        "destination {} resolves to {} which is not a \
-                         regular file",
-                        dest.display(),
-                        target.display()
-                    ),
-                    message: "only regular files can be replaced".to_string(),
-                }),
-                Ok(_) => Ok(std::borrow::Cow::Owned(target)),
-                Err(e) => Err(Error::Io {
-                    context: format!(
-                        "could not examine {} resolved from symbolic \
-                         link {}",
-                        target.display(),
-                        dest.display()
-                    ),
-                    message: e.to_string(),
-                }),
-            }
-        }
-        Ok(meta) if meta.is_dir() => Err(Error::Io {
-            context: format!("destination {} is a directory", dest.display()),
-            message: "a deck file cannot replace a directory".to_string(),
-        }),
-        Ok(meta) if !meta.is_file() => Err(Error::Io {
-            context: format!(
-                "destination {} is not a regular file",
-                dest.display()
-            ),
-            message: "only regular files can be replaced".to_string(),
-        }),
-        Ok(_) => Ok(std::borrow::Cow::Borrowed(dest)),
     }
+}
+
+/// Resolve a valid symlink destination, once, to its final target —
+/// complete chain, relative targets included — and validate that the
+/// target may be replaced.
+fn symlink_target(dest: &Path) -> Result<PathBuf> {
+    let target = std::fs::canonicalize(dest).map_err(|e| Error::Io {
+        context: format!(
+            "destination {} is a symbolic link whose target could not \
+             be resolved",
+            dest.display()
+        ),
+        message: e.to_string(),
+    })?;
+    let meta = std::fs::symlink_metadata(&target).map_err(|e| Error::Io {
+        context: format!(
+            "could not examine {} resolved from symbolic link {}",
+            target.display(),
+            dest.display()
+        ),
+        message: e.to_string(),
+    })?;
+    ensure_replaceable(dest, &target, &meta)?;
+    Ok(target)
+}
+
+/// Refuse to replace directories and other non-regular entries,
+/// whether reached directly or through a symlink.
+fn ensure_replaceable(
+    dest: &Path,
+    path: &Path,
+    meta: &std::fs::Metadata,
+) -> Result<()> {
+    if meta.is_file() {
+        return Ok(());
+    }
+    let subject = if path == dest {
+        format!("destination {}", dest.display())
+    } else {
+        format!(
+            "destination {} resolves to {}",
+            dest.display(),
+            path.display()
+        )
+    };
+    let (state, advice): (&str, &str) = if meta.is_dir() {
+        ("is a directory", "a deck file cannot replace a directory")
+    } else {
+        (
+            "is not a regular file",
+            "only regular files can be replaced",
+        )
+    };
+    Err(Error::Io {
+        context: format!("{subject} {state}"),
+        message: advice.to_string(),
+    })
 }
 
 fn create_staging_file(
@@ -328,394 +378,5 @@ fn sync_directory(_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Staging-file names currently present in `dir` (test assertions).
 #[cfg(test)]
-fn staging_leftovers(dir: &Path) -> Vec<String> {
-    std::fs::read_dir(dir)
-        .expect("read dir")
-        .filter_map(std::result::Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.starts_with(".labeldeck-tmp-"))
-        .collect()
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Keeps the temp directory alive for the test's duration.
-    struct Dir(tempfile::TempDir);
-
-    impl Dir {
-        fn new(name: &str) -> (Self, PathBuf) {
-            let guard = tempfile::tempdir().expect("temp dir");
-            let path = guard.path().join(name);
-            (Self(guard), path)
-        }
-    }
-
-    fn fault_at(stage: Stage) -> impl FnMut(Stage) -> std::io::Result<()> {
-        move |reached: Stage| {
-            if reached == stage {
-                Err(std::io::Error::other("injected failure"))
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[test]
-    fn without_force_a_new_destination_is_created_durably() {
-        let (guard, path) = Dir::new("new.json");
-        let outcome = write_deck(&path, b"[]", false).unwrap();
-        assert!(matches!(outcome, WriteOutcome::Durable));
-        assert_eq!(std::fs::read(&path).unwrap(), b"[]");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn without_force_an_existing_destination_is_never_modified() {
-        let (guard, path) = Dir::new("existing.json");
-        std::fs::write(&path, b"original").unwrap();
-        let error = write_deck(&path, b"replacement", false).unwrap_err();
-        assert!(matches!(error, Error::OutputExists { .. }), "{error}");
-        assert_eq!(std::fs::read(&path).unwrap(), b"original");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn install_guards_destinations_that_appear_late() {
-        let (guard, path);
-        // There is no prior existence check to fool: whatever exists
-        // when the no-replace commit runs — created before the call
-        // or between staging and commit — fails atomically at the
-        // commit, never an overwrite.
-        (guard, path) = Dir::new("late.json");
-        std::fs::write(&path, b"first").unwrap();
-        assert!(matches!(
-            write_deck(&path, b"second", false).unwrap_err(),
-            Error::OutputExists { .. }
-        ));
-        assert_eq!(std::fs::read(&path).unwrap(), b"first");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn with_force_the_destination_is_deliberately_replaced() {
-        let (guard, path) = Dir::new("forced.json");
-        std::fs::write(&path, b"old contents").unwrap();
-        let outcome = write_deck(&path, b"new contents", true).unwrap();
-        assert!(matches!(outcome, WriteOutcome::Durable));
-        assert_eq!(std::fs::read(&path).unwrap(), b"new contents");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn with_force_an_absent_destination_is_created() {
-        let (guard, path) = Dir::new("forced-new.json");
-        let outcome = write_deck(&path, b"fresh", true).unwrap();
-        assert!(matches!(outcome, WriteOutcome::Durable));
-        assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn non_existence_failures_stay_io_errors() {
-        // A path whose parent is missing cannot be staged: that is an
-        // I/O error, not a claim that the destination exists.
-        let (guard, _parent) = Dir::new("parent-marker");
-        let path = guard.0.path().join("missing-dir").join("deck.json");
-        let error = write_deck(&path, b"[]", false).unwrap_err();
-        assert!(
-            matches!(error, Error::Io { .. })
-                && !matches!(error, Error::OutputExists { .. }),
-            "{error}"
-        );
-        // Nothing could be staged in the existing parent either.
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn failed_contents_leave_an_existing_destination_unchanged() {
-        let (guard, path) = Dir::new("contents-fail.json");
-        std::fs::write(&path, b"old contents").unwrap();
-        let mut fault = fault_at(Stage::Contents);
-        let error = staged_write(&path, b"new contents", true, &mut fault)
-            .unwrap_err();
-        assert!(matches!(error, Error::Io { .. }), "{error}");
-        assert_eq!(
-            std::fs::read(&path).unwrap(),
-            b"old contents",
-            "force must not touch the destination before the commit"
-        );
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn failed_contents_never_create_the_destination() {
-        let (guard, path) = Dir::new("contents-absent.json");
-        let mut fault = fault_at(Stage::Contents);
-        staged_write(&path, b"new contents", false, &mut fault).unwrap_err();
-        assert!(
-            !path.exists(),
-            "no partial final deck may appear on a failed write"
-        );
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn failed_commit_leaves_an_existing_destination_unchanged() {
-        let (guard, path) = Dir::new("commit-fail.json");
-        std::fs::write(&path, b"old contents").unwrap();
-        let mut fault = fault_at(Stage::Commit);
-        let error = staged_write(&path, b"new contents", true, &mut fault)
-            .unwrap_err();
-        assert!(matches!(error, Error::Io { .. }), "{error}");
-        assert_eq!(std::fs::read(&path).unwrap(), b"old contents");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn failed_commit_leaves_no_partial_destination() {
-        let (guard, path) = Dir::new("commit-absent.json");
-        let mut fault = fault_at(Stage::Commit);
-        staged_write(&path, b"new contents", false, &mut fault).unwrap_err();
-        assert!(
-            !path.exists(),
-            "the final name must appear only at the atomic commit"
-        );
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn failed_directory_sync_reports_installed_but_unconfirmed() {
-        let (guard, path) = Dir::new("durability-fail.json");
-        let mut fault = fault_at(Stage::DirectorySync);
-        let outcome =
-            staged_write(&path, b"complete deck", true, &mut fault).unwrap();
-        // The deck is fully installed and is not rolled back; the
-        // outcome merely reports that durability was not confirmed.
-        match outcome {
-            WriteOutcome::DurabilityUnconfirmed(error) => {
-                assert_eq!(error.to_string(), "injected failure");
-            }
-            other => panic!("expected DurabilityUnconfirmed, got {other:?}"),
-        }
-        assert_eq!(std::fs::read(&path).unwrap(), b"complete deck");
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[test]
-    fn installed_decks_hold_the_complete_contents() {
-        // A payload far larger than any single write buffer proves the
-        // destination only ever references fully staged content.
-        let payload: Vec<u8> =
-            (0..100_000u32).map(|i| (i % 251) as u8).collect();
-        let (guard, path) = Dir::new("large.json");
-        let outcome = write_deck(&path, &payload, false).unwrap();
-        assert!(matches!(outcome, WriteOutcome::Durable));
-        assert_eq!(std::fs::read(&path).unwrap(), payload);
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-        let (guard, forced) = Dir::new("large-forced.json");
-        std::fs::write(&forced, b"tiny").unwrap();
-        write_deck(&forced, &payload, true).unwrap();
-        assert_eq!(std::fs::read(&forced).unwrap(), payload);
-        assert!(staging_leftovers(guard.0.path()).is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn forced_replacement_keeps_owner_read_write() {
-        use std::os::unix::fs::PermissionsExt;
-        let (_guard, path) = Dir::new("mode.json");
-        std::fs::write(&path, b"old").unwrap();
-        // Replacing an existing deck stages a fresh file with the
-        // default mode (umask); owner read/write must remain.
-        write_deck(&path, b"new", true).unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o600, 0o600);
-    }
-}
-
-/// Symlink semantics are exercised on Unix, where CI can create
-/// symlinks unconditionally. The production code handles symlinks on
-/// every platform; Windows CI cannot rely on symlink-creation
-/// privileges, so coverage there is the portable suite above.
-#[cfg(unix)]
-#[cfg(test)]
-mod symlink_tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-
-    fn is_symlink(path: &Path) -> bool {
-        std::fs::symlink_metadata(path)
-            .expect("symlink_metadata")
-            .file_type()
-            .is_symlink()
-    }
-
-    #[test]
-    fn forced_export_through_an_absolute_symlink_replaces_the_target() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let shared = guard.path().join("shared");
-        let work = guard.path().join("work");
-        std::fs::create_dir_all(&shared).unwrap();
-        std::fs::create_dir_all(&work).unwrap();
-        let target = shared.join("labels.json");
-        std::fs::write(&target, b"OLD").unwrap();
-        let deck = work.join("labels.json");
-        symlink(&target, &deck).unwrap();
-
-        write_deck(&deck, b"NEW", true).unwrap();
-
-        assert_eq!(std::fs::read(&target).unwrap(), b"NEW");
-        assert!(is_symlink(&deck), "the symlink itself must survive");
-        assert_eq!(
-            std::fs::read_link(&deck).unwrap(),
-            target,
-            "the symlink target must be unchanged"
-        );
-    }
-
-    #[test]
-    fn forced_export_through_a_relative_symlink_replaces_the_target() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let shared = guard.path().join("shared");
-        let work = guard.path().join("work");
-        std::fs::create_dir_all(&shared).unwrap();
-        std::fs::create_dir_all(&work).unwrap();
-        let target = shared.join("labels.json");
-        std::fs::write(&target, b"OLD").unwrap();
-        let deck = work.join("labels.json");
-        // Relative to the directory containing the link, not the
-        // process working directory.
-        symlink("../shared/labels.json", &deck).unwrap();
-
-        write_deck(&deck, b"NEW", true).unwrap();
-
-        assert_eq!(std::fs::read(&target).unwrap(), b"NEW");
-        assert!(is_symlink(&deck));
-        assert_eq!(
-            std::fs::read_link(&deck).unwrap(),
-            Path::new("../shared/labels.json")
-        );
-    }
-
-    #[test]
-    fn forced_export_through_a_symlink_chain_updates_the_final_target() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let dir = guard.path().join("links");
-        std::fs::create_dir_all(&dir).unwrap();
-        let final_target = guard.path().join("real-deck.json");
-        std::fs::write(&final_target, b"OLD").unwrap();
-        symlink("../real-deck.json", dir.join("second-link.json")).unwrap();
-        symlink("second-link.json", dir.join("first-link.json")).unwrap();
-
-        write_deck(&dir.join("first-link.json"), b"NEW", true).unwrap();
-
-        assert_eq!(std::fs::read(&final_target).unwrap(), b"NEW");
-        assert!(is_symlink(&dir.join("first-link.json")));
-        assert!(is_symlink(&dir.join("second-link.json")));
-        assert!(
-            !dir.join("real-deck.json").exists(),
-            "no stray file beside the links"
-        );
-    }
-
-    #[test]
-    fn without_force_a_symlink_destination_refuses_and_keeps_target() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let target = guard.path().join("target.json");
-        std::fs::write(&target, b"OLD").unwrap();
-        let deck = guard.path().join("labels.json");
-        symlink("target.json", &deck).unwrap();
-
-        let error = write_deck(&deck, b"NEW", false).unwrap_err();
-        assert!(matches!(error, Error::OutputExists { .. }), "{error}");
-        assert_eq!(std::fs::read(&target).unwrap(), b"OLD");
-        assert!(is_symlink(&deck));
-    }
-
-    #[test]
-    fn without_force_a_dangling_symlink_refuses_and_keeps_link() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let deck = guard.path().join("labels.json");
-        symlink("does-not-exist.json", &deck).unwrap();
-
-        let error = write_deck(&deck, b"NEW", false).unwrap_err();
-        assert!(matches!(error, Error::OutputExists { .. }), "{error}");
-        assert!(is_symlink(&deck));
-        assert!(
-            !guard.path().join("does-not-exist.json").exists(),
-            "the missing target must not be created"
-        );
-    }
-
-    #[test]
-    fn forced_export_to_a_dangling_symlink_fails_and_preserves_link() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let deck = guard.path().join("labels.json");
-        symlink("nowhere.json", &deck).unwrap();
-
-        let error = write_deck(&deck, b"NEW", true).unwrap_err();
-        let text = error.to_string();
-        assert!(text.contains("symbolic link"), "{text}");
-        assert!(text.contains("labels.json"), "{text}");
-        assert!(is_symlink(&deck), "the dangling link must survive");
-        assert!(
-            !guard.path().join("nowhere.json").exists(),
-            "the missing target must not be silently created"
-        );
-        assert!(staging_leftovers(guard.path()).is_empty());
-    }
-
-    #[test]
-    fn forced_export_through_a_symlink_stages_beside_the_resolved_target() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let link_dir = guard.path().join("links");
-        let target_dir = guard.path().join("targets");
-        std::fs::create_dir_all(&link_dir).unwrap();
-        std::fs::create_dir_all(&target_dir).unwrap();
-        let target = target_dir.join("labels.json");
-        std::fs::write(&target, b"OLD").unwrap();
-        let deck = link_dir.join("labels.json");
-        symlink(&target, &deck).unwrap();
-
-        // Fail right after staging is created; at that moment the
-        // staging file must live beside the resolved target, and the
-        // symlink's directory must hold nothing but the link.
-        let mut staged_beside_target = None;
-        let mut fault = |stage: Stage| -> std::io::Result<()> {
-            if stage == Stage::Contents {
-                staged_beside_target =
-                    Some(staging_leftovers(&target_dir).len());
-                Err(std::io::Error::other("stop before write"))
-            } else {
-                Ok(())
-            }
-        };
-        assert!(staged_write(&deck, b"NEW", true, &mut fault).is_err());
-        assert_eq!(staged_beside_target, Some(1));
-        assert!(
-            staging_leftovers(&link_dir).is_empty(),
-            "nothing may be staged beside the symlink"
-        );
-        // The failed pre-commit attempt changed nothing.
-        assert_eq!(std::fs::read(&target).unwrap(), b"OLD");
-    }
-
-    #[test]
-    fn forced_export_to_a_directory_fails_without_touching_it() {
-        let guard = tempfile::tempdir().expect("temp dir");
-        let dir = guard.path().join("deck-dir");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(dir.join("inner.txt"), b"precious").unwrap();
-
-        let error = write_deck(&dir, b"NEW", true).unwrap_err();
-        let text = error.to_string();
-        assert!(text.contains("deck-dir"), "{text}");
-        assert!(text.contains("directory"), "{text}");
-        assert!(dir.is_dir(), "the directory must survive");
-        assert_eq!(std::fs::read(dir.join("inner.txt")).unwrap(), b"precious");
-        assert!(staging_leftovers(guard.path()).is_empty());
-    }
-}
+mod tests;

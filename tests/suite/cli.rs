@@ -1467,11 +1467,9 @@ fn global_export_repairing_directory_permissions_never_truncates() {
 }
 
 #[test]
-fn refused_overwrites_leave_contents_untouched() {
-    // Local default and explicit --file variants of the same guarantee,
-    // with content assertions (the global case is covered above).
-    let isolation = Isolation::new("refused-contents");
-    let dir = workdir("refused-contents");
+fn local_default_overwrite_refusal_and_forced_replacement() {
+    let isolation = Isolation::new("refused-local");
+    let dir = workdir("refused-local");
     std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
 
     let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
@@ -1484,8 +1482,23 @@ fn refused_overwrites_leave_contents_untouched() {
         LOCAL_DECK
     );
 
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
+        "[]\n"
+    );
+}
+
+#[test]
+fn explicit_file_overwrite_refusal_and_forced_replacement() {
+    let isolation = Isolation::new("refused-explicit");
+    let dir = workdir("refused-explicit");
     let explicit = dir.join("chosen.json");
     std::fs::write(&explicit, GLOBAL_DECK).unwrap();
+
     let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
     let mut command = isolation.command(&[
         "export",
@@ -1498,16 +1511,6 @@ fn refused_overwrites_leave_contents_untouched() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(std::fs::read_to_string(&explicit).unwrap(), GLOBAL_DECK);
 
-    // Both succeed and replace with --force.
-    let mock = mock_github(remote_page(&[]));
-    let mut command = isolation.command(&["export", REPO, "--force"]);
-    command.current_dir(&dir);
-    assert!(run(against_mock(&mock, &mut command)).status.success());
-    assert_eq!(
-        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
-        "[]\n"
-    );
-
     let mock = mock_github(remote_page(&[]));
     let mut command = isolation.command(&[
         "export",
@@ -1519,6 +1522,30 @@ fn refused_overwrites_leave_contents_untouched() {
     command.current_dir(&dir);
     assert!(run(against_mock(&mock, &mut command)).status.success());
     assert_eq!(std::fs::read_to_string(&explicit).unwrap(), "[]\n");
+}
+
+#[test]
+fn successful_exports_leave_no_staging_residue() {
+    let isolation = Isolation::new("staging-residue");
+    let dir = workdir("staging-residue");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+    let explicit = dir.join("chosen.json");
+    std::fs::write(&explicit, GLOBAL_DECK).unwrap();
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+        "--force",
+    ]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
 
     // Successful exports never leave staging files behind.
     let mut names: Vec<String> = std::fs::read_dir(&dir)

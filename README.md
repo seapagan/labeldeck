@@ -113,7 +113,7 @@ directory (`~/.config/labeldeck/labels.json` on Linux,
 overrides the location):
 
 ```console
-$ labeldeck export seapagan/labeldeck --global
+labeldeck export seapagan/labeldeck --global
 ```
 
 `diff` and `sync` then use a repository-local `./labels.json` when one

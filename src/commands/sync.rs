@@ -110,10 +110,14 @@ impl sync_engine::Reporter for StderrReporter {
 fn is_plain_path_token(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('-')
-        && path.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'.' | b'_' | b'-' | b'/')
-        })
+        && path.bytes().all(is_plain_path_byte)
+}
+
+/// Whether one byte may appear in a bare-argument path token: ASCII
+/// alphanumerics plus `.`, `_`, `-`, and `/` (a path separator on
+/// every supported platform).
+fn is_plain_path_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"._-/".contains(&byte)
 }
 
 /// The "run again" guidance shown after `--dry-run`, pinned to the
