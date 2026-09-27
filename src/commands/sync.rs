@@ -139,20 +139,27 @@ fn follow_up_command(
             repo.owner, repo.name
         ),
         Some(path) => {
-            let rendered = path.to_string_lossy();
-            if is_plain_path_token(&rendered) {
+            // Lossy text decides *safety* (non-UTF-8 paths contain
+            // replacement characters and are never plain tokens), but
+            // the structured form renders the path with Debug-style
+            // escaping so newlines, tabs, control characters, and
+            // non-UTF-8 bytes stay visible as escapes instead of
+            // visually restructuring the diagnostic.
+            if is_plain_path_token(&path.to_string_lossy()) {
                 format!(
                     "Run again without --dry-run to apply: labeldeck sync \
                      {}/{} --file {} {prune_flag}",
-                    repo.owner, repo.name, rendered
+                    repo.owner,
+                    repo.name,
+                    path.display()
                 )
             } else {
                 format!(
                     "Run again without --dry-run, using:\n  repository: \
-                     {}/{}\n  file:       {}\n  pruning:    {}",
+                     {}/{}\n  file:       {:?}\n  pruning:    {}",
                     repo.owner,
                     repo.name,
-                    rendered,
+                    path,
                     if prune { "enabled" } else { "disabled" }
                 )
             }
@@ -191,6 +198,10 @@ mod tests {
             "$HOME/labels.json",
             "-flag-like.json",
             "labels*.json",
+            "we\nird.json",
+            "ta\tb.json",
+            "con\x07trol.json",
+            "café.json",
         ] {
             let path = std::path::PathBuf::from(awkward);
             let guidance = follow_up_command(&repo, Some(&path), true);
@@ -199,14 +210,58 @@ mod tests {
                 "{awkward:?} must not be shown as a copy/paste command: \
                  {guidance}"
             );
+            // The diagnostic form is the path's own Debug rendering, so
+            // it stays identifiable while every control character and
+            // backslash remains visibly escaped.
             assert!(
-                guidance.contains(awkward),
-                "{awkward:?} must appear verbatim: {guidance}"
+                guidance.contains(&format!("{:?}", path)),
+                "{awkward:?} must appear in escaped debug form: {guidance}"
             );
             assert!(guidance.contains("repository: octocat/hello-world"));
             assert!(guidance.contains("file:"));
             assert!(guidance.contains("pruning:    enabled"));
         }
+    }
+
+    #[test]
+    fn embedded_newlines_and_tabs_do_not_restructure_the_guidance() {
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        for awkward in ["we\nird.json", "ta\tb.json", "con\x07trol.json"] {
+            let path = std::path::PathBuf::from(awkward);
+            let guidance = follow_up_command(&repo, Some(&path), false);
+            // The file field stays one field on one line, ending in the
+            // escaped debug form, and no raw control character leaks.
+            let file_line = guidance
+                .split('\n')
+                .find(|line| line.starts_with("  file:"))
+                .expect("file field");
+            assert_eq!(
+                file_line,
+                format!("  file:       {:?}", path),
+                "{awkward:?}"
+            );
+            assert!(guidance.contains("pruning:    disabled"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_paths_render_as_escaped_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        let repo = RepoSpec::parse("octocat/hello-world").unwrap();
+        let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+            b"bad\xff.json",
+        ));
+        let guidance = follow_up_command(&repo, Some(&path), true);
+        assert!(!guidance.contains("labeldeck sync"));
+        // The invalid byte is shown as an escape, never silently
+        // rendered as a lossy replacement character.
+        assert!(
+            guidance.contains("bad\\xFF.json")
+                || guidance.contains("bad\\xff.json"),
+            "non-UTF-8 byte must be escaped: {guidance}"
+        );
+        assert!(!guidance.contains('\u{FFFD}'), "{guidance}");
     }
 
     #[test]
