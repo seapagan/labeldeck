@@ -17,7 +17,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.98.1
-  MSRV_VERSION: "1.85.1"
+  MSRV_VERSION: "1.88.0"
   RUSTDOCFLAGS: "-D warnings"
 
 jobs:

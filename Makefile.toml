@@ -1,5 +1,5 @@
 [env]
-MSRV_VERSION = "1.85.1"
+MSRV_VERSION = "1.88.0"
 
 [tasks.format]
 description = "Check Rust formatting"
