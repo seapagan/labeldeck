@@ -240,8 +240,7 @@ mod tests {
                 // control character and backslash remains visibly
                 // escaped.
                 assert!(
-                    guidance
-                        .contains(&format!("{:?}", selection.path())),
+                    guidance.contains(&format!("{:?}", selection.path())),
                     "{awkward:?} must appear in escaped debug form: {guidance}"
                 );
                 assert!(guidance.contains("repository: octocat/hello-world"));

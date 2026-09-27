@@ -1298,7 +1298,8 @@ fn global_backed_dry_run_guidance_stays_pinned_when_local_deck_appears() {
     let dir = workdir("suggest-global-race"); // no local deck yet
 
     let mock = mock_github(dry_run_list());
-    let mut command = isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
+    let mut command =
+        isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
     command.current_dir(&dir);
     let output = run(against_mock(&mock, &mut command));
     mock.assert_satisfied();
@@ -1518,4 +1519,16 @@ fn refused_overwrites_leave_contents_untouched() {
     command.current_dir(&dir);
     assert!(run(against_mock(&mock, &mut command)).status.success());
     assert_eq!(std::fs::read_to_string(&explicit).unwrap(), "[]\n");
+
+    // Successful exports never leave staging files behind.
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["chosen.json".to_string(), "labels.json".to_string()],
+        "no staging leftovers: {names:?}"
+    );
 }
