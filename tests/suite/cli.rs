@@ -1112,29 +1112,31 @@ fn local_malformed_deck_fails_without_global_fallback() {
     assert!(text.contains("labels.json"), "{text}");
 }
 
-#[cfg(unix)]
 #[test]
-fn local_unreadable_deck_fails_without_global_fallback() {
-    use std::os::unix::fs::PermissionsExt;
-    let isolation = Isolation::new("local-unreadable");
+fn local_non_file_deck_fails_without_global_fallback() {
+    let isolation = Isolation::new("local-non-file");
     std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
         .unwrap();
-    let dir = workdir("local-unreadable");
-    let deck = dir.join("labels.json");
-    std::fs::write(&deck, LOCAL_DECK).unwrap();
-    std::fs::set_permissions(&deck, std::fs::Permissions::from_mode(0o000))
-        .unwrap();
+    let dir = workdir("local-non-file");
+    // A directory named `labels.json` exists, so the resolver selects the
+    // local entry; reading it as a canonical deck then fails on every
+    // platform and privilege level (root included).
+    std::fs::create_dir(dir.join("labels.json")).unwrap();
 
     let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
     let mut command = isolation.command(&["diff", REPO]);
     command.current_dir(&dir);
     let output = run(against_mock(&mock, &mut command));
-    std::fs::set_permissions(&deck, std::fs::Permissions::from_mode(0o644))
-        .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let text = stderr(&output);
     assert!(text.contains("could not read"), "{text}");
     assert!(text.contains("labels.json"), "{text}");
+    assert!(
+        !text.contains(isolation.config_dir.to_string_lossy().as_ref()),
+        "must fail on the local deck, not the global one: {text}"
+    );
+    let out = stdout(&output);
+    assert!(!out.contains("docs"), "global deck must not be used: {out}");
 }
 
 #[test]
