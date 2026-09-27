@@ -929,17 +929,44 @@ const LOCAL_DECK: &str =
 const GLOBAL_DECK: &str =
     "[{\"name\": \"docs\", \"color\": \"0075ca\", \"description\": \"\"}]";
 
-fn workdir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "labeldeck-cli-{tag}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A per-test working directory whose cleanup guard is retained for
+/// the fixture's lifetime (RAII via `tempfile::TempDir`).
+struct Workdir {
+    _guard: tempfile::TempDir,
+}
+
+impl Workdir {
+    fn new(_tag: &str) -> Self {
+        Self {
+            _guard: tempfile::tempdir().expect("temp dir"),
+        }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self._guard.path()
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self._guard.path().join(name)
+    }
+}
+
+impl AsRef<std::path::Path> for Workdir {
+    fn as_ref(&self) -> &std::path::Path {
+        self.path()
+    }
+}
+
+impl std::ops::Deref for Workdir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &Self::Target {
+        self.path()
+    }
+}
+
+fn workdir(tag: &str) -> Workdir {
+    Workdir::new(tag)
 }
 
 fn remote_page(labels: &[(&str, &str, Option<&str>)]) -> Vec<Expectation> {
@@ -1354,4 +1381,103 @@ fn dry_run_suggestion_renders_awkward_paths_safely() {
     assert!(text.contains("my labels.json"), "{text}");
     assert!(text.contains("repository: octocat/hello-world"), "{text}");
     assert!(text.contains("pruning:    enabled"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn global_export_repairing_directory_permissions_never_truncates() {
+    use std::os::unix::fs::PermissionsExt;
+    let isolation = Isolation::new("export-global-repair");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, LOCAL_DECK).unwrap();
+    let dir = workdir("export-global-repair");
+
+    // An unsearchable configuration directory makes naive existence
+    // checks report false; the atomic destination-open must still
+    // protect the existing deck after the directory is repaired.
+    std::fs::set_permissions(
+        &isolation.config_dir,
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&["export", REPO, "--global"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("refusing to overwrite"));
+
+    // The directory was repaired, but the deck is byte-for-byte intact.
+    assert_eq!(
+        std::fs::read_to_string(&global).unwrap(),
+        LOCAL_DECK,
+        "the existing global deck must not be truncated or replaced"
+    );
+
+    // With --force the same repaired-directory run intentionally
+    // replaces the deck.
+    let mock = mock_github(remote_page(&[]));
+    let mut command =
+        isolation.command(&["export", REPO, "--global", "--force"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), "[]\n");
+}
+
+#[test]
+fn refused_overwrites_leave_contents_untouched() {
+    // Local default and explicit --file variants of the same guarantee,
+    // with content assertions (the global case is covered above).
+    let isolation = Isolation::new("refused-contents");
+    let dir = workdir("refused-contents");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&["export", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
+        LOCAL_DECK
+    );
+
+    let explicit = dir.join("chosen.json");
+    std::fs::write(&explicit, GLOBAL_DECK).unwrap();
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(std::fs::read_to_string(&explicit).unwrap(), GLOBAL_DECK);
+
+    // Both succeed and replace with --force.
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
+        "[]\n"
+    );
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+        "--force",
+    ]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    assert_eq!(std::fs::read_to_string(&explicit).unwrap(), "[]\n");
 }
