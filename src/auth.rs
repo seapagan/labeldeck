@@ -81,6 +81,17 @@ pub fn read_stored_token(config_dir: &Path) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
+/// Create the labeldeck configuration directory when needed, with the
+/// platform-appropriate private permissions used for credential
+/// storage (0700 on Unix; platform defaults elsewhere).
+///
+/// Fails — rather than reporting success with weakened permissions —
+/// when the directory cannot be created or, on Unix, cannot be
+/// tightened to 0700.
+pub fn ensure_config_dir(config_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(config_dir)?;
+    restrict_directory_permissions(config_dir)
+}
 
 /// Persist a token for future use.
 ///
@@ -88,8 +99,7 @@ pub fn read_stored_token(config_dir: &Path) -> Option<String> {
 /// file is written 0600 and the directory is tightened to 0700; other
 /// platforms get the platform default protections.
 pub fn store_token(config_dir: &Path, token: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(config_dir)?;
-    restrict_directory_permissions(config_dir);
+    ensure_config_dir(config_dir)?;
     let path = token_path(config_dir);
     write_private_file(&path, token)
 }
@@ -143,13 +153,15 @@ fn write_private_file(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn restrict_directory_permissions(dir: &Path) {
+fn restrict_directory_permissions(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).ok();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(not(unix))]
-fn restrict_directory_permissions(_dir: &Path) {}
+fn restrict_directory_permissions(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -309,5 +321,36 @@ mod tests {
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700, "config dir must be 0700");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_ensure_config_dir_creates_a_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = tempfile::tempdir().expect("temp dir");
+        let dir = guard.path().join("labeldeck");
+        ensure_config_dir(&dir).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_hardening_failures_are_returned_not_swallowed() {
+        // A chmod target that does not exist fails for every uid,
+        // root included: hardening must surface that error instead of
+        // silently claiming the directory is private.
+        let missing = std::path::PathBuf::from("labeldeck/no/such/dir");
+        assert!(restrict_directory_permissions(&missing).is_err());
+    }
+
+    #[test]
+    fn ensure_config_dir_is_idempotent_for_existing_directories() {
+        let guard = tempfile::tempdir().expect("temp dir");
+        let dir = guard.path().join("labeldeck");
+        std::fs::create_dir_all(&dir).unwrap();
+        ensure_config_dir(&dir).unwrap();
+        ensure_config_dir(&dir).unwrap();
+        assert!(dir.is_dir());
     }
 }

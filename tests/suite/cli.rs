@@ -920,3 +920,670 @@ fn repository_argument_position_is_consistent_across_commands() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Global default deck: read precedence and export --global.
+
+const LOCAL_DECK: &str =
+    "[{\"name\": \"bug\", \"color\": \"d73a4a\", \"description\": \"\"}]";
+const GLOBAL_DECK: &str =
+    "[{\"name\": \"docs\", \"color\": \"0075ca\", \"description\": \"\"}]";
+
+/// A per-test working directory whose cleanup guard is retained for
+/// the fixture's lifetime (RAII via `tempfile::TempDir`).
+struct Workdir {
+    _guard: tempfile::TempDir,
+}
+
+impl Workdir {
+    fn new(_tag: &str) -> Self {
+        Self {
+            _guard: tempfile::tempdir().expect("temp dir"),
+        }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self._guard.path()
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self._guard.path().join(name)
+    }
+}
+
+impl AsRef<std::path::Path> for Workdir {
+    fn as_ref(&self) -> &std::path::Path {
+        self.path()
+    }
+}
+
+impl std::ops::Deref for Workdir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &Self::Target {
+        self.path()
+    }
+}
+
+fn workdir(tag: &str) -> Workdir {
+    Workdir::new(tag)
+}
+
+fn remote_page(labels: &[(&str, &str, Option<&str>)]) -> Vec<Expectation> {
+    vec![
+        Expectation::get(&format!("/repos/{REPO}/labels?per_page=100"))
+            .labels_page(&labels_json(labels), None),
+    ]
+}
+
+#[test]
+fn diff_prefers_local_deck_when_local_and_global_exist() {
+    let isolation = Isolation::new("precedence-local");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("precedence-local");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+
+    // Remote exactly matches the LOCAL deck: local winning means exit 0.
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    assert!(text.contains("UNCHANGED bug"), "{text}");
+    assert!(
+        !text.contains("docs"),
+        "global deck must not be used: {text}"
+    );
+}
+
+#[test]
+fn diff_and_sync_fall_back_to_global_deck_when_local_absent() {
+    let isolation = Isolation::new("precedence-global");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("precedence-global");
+
+    // Remote matches the GLOBAL deck: falling back means exit 0.
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout(&output).contains("UNCHANGED docs"));
+
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["sync", REPO, "--dry-run"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout(&output).contains("UNCHANGED docs"));
+}
+
+#[test]
+fn explicit_file_beats_local_and_global_decks() {
+    let isolation = Isolation::new("precedence-explicit");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("precedence-explicit");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+    let explicit = dir.join("chosen.json");
+    std::fs::write(
+        &explicit,
+        "[{\"name\": \"feature\", \"color\": \"a2eeef\", \"description\": \"\"}]",
+    )
+    .unwrap();
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&[
+        "diff",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(1));
+    let text = stdout(&output);
+    assert!(text.contains("CREATE feature"), "{text}");
+    assert!(!text.contains("bug") && !text.contains("docs"), "{text}");
+}
+
+#[test]
+fn explicit_missing_file_fails_without_fallback() {
+    let isolation = Isolation::new("explicit-missing");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("explicit-missing");
+    let absent = dir.join("absent.json");
+
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command =
+        isolation.command(&["diff", REPO, "--file", absent.to_str().unwrap()]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    // The mock expectation is intentionally left unconsumed: no read of
+    // the repository may happen once the explicit file is missing.
+    let text = stderr(&output);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(text.contains("absent.json"), "{text}");
+}
+
+#[test]
+fn explicit_malformed_file_fails_without_fallback() {
+    let isolation = Isolation::new("explicit-bad");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("explicit-bad");
+    let broken = dir.join("broken.json");
+    std::fs::write(&broken, "{not json").unwrap();
+
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command =
+        isolation.command(&["diff", REPO, "--file", broken.to_str().unwrap()]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(text.contains("broken.json"), "{text}");
+    assert!(text.contains("invalid JSON"), "{text}");
+}
+
+#[test]
+fn local_malformed_deck_fails_without_global_fallback() {
+    let isolation = Isolation::new("local-bad");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("local-bad");
+    std::fs::write(dir.join("labels.json"), "{not json").unwrap();
+
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(text.contains("invalid JSON"), "{text}");
+    assert!(text.contains("labels.json"), "{text}");
+}
+
+#[test]
+fn local_non_file_deck_fails_without_global_fallback() {
+    let isolation = Isolation::new("local-non-file");
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("local-non-file");
+    // A directory named `labels.json` exists, so the resolver selects the
+    // local entry; reading it as a canonical deck then fails on every
+    // platform and privilege level (root included).
+    std::fs::create_dir(dir.join("labels.json")).unwrap();
+
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(text.contains("could not read"), "{text}");
+    assert!(text.contains("labels.json"), "{text}");
+    assert!(
+        !text.contains(isolation.config_dir.to_string_lossy().as_ref()),
+        "must fail on the local deck, not the global one: {text}"
+    );
+    let out = stdout(&output);
+    assert!(!out.contains("docs"), "global deck must not be used: {out}");
+}
+
+#[test]
+fn missing_local_and_global_decks_lists_both_locations() {
+    let isolation = Isolation::new("no-decks");
+    let dir = workdir("no-decks");
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(text.contains("no canonical label file found"), "{text}");
+    assert!(text.contains("labels.json"), "{text}");
+    assert!(
+        text.contains(isolation.config_dir.to_string_lossy().as_ref()),
+        "must name the global location: {text}"
+    );
+    assert!(text.contains("--file"), "{text}");
+    assert!(text.contains("--global"), "{text}");
+}
+
+#[test]
+fn export_global_writes_the_config_directory_deck() {
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", Some("broken"))]));
+    let isolation = Isolation::new("export-global");
+    let dir = workdir("export-global");
+
+    let mut command = isolation.command(&["export", REPO, "--global"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    let global = isolation.config_dir.join("labels.json");
+    let written = std::fs::read_to_string(&global).unwrap();
+    assert!(written.contains("\"bug\""));
+    assert!(
+        !dir.join("labels.json").exists(),
+        "local deck must be untouched"
+    );
+
+    // Overwrite protection applies to the global deck too.
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--global"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("refusing to overwrite"));
+
+    // --global --force deliberately replaces it.
+    let mock = mock_github(remote_page(&[]));
+    let mut command =
+        isolation.command(&["export", REPO, "--global", "--force"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), "[]\n");
+}
+
+#[test]
+fn export_global_conflicts_with_file() {
+    let isolation = Isolation::new("export-global-conflict");
+    let output = run(&mut isolation.command(&[
+        "export",
+        REPO,
+        "--global",
+        "--file",
+        "other.json",
+    ]));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("cannot be used with"));
+}
+
+#[test]
+fn plain_export_never_modifies_an_existing_global_deck() {
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let isolation = Isolation::new("export-local-only");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, "sentinel").unwrap();
+    let dir = workdir("export-local-only");
+
+    let mut command = isolation.command(&["export", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    assert!(dir.join("labels.json").exists());
+    assert_eq!(
+        std::fs::read_to_string(&global).unwrap(),
+        "sentinel",
+        "plain export must never touch the global deck"
+    );
+}
+
+// ---------------------------------------------------------------------
+// sync --dry-run follow-up command suggestion.
+
+fn dry_run_list() -> Vec<Expectation> {
+    remote_page(&[("docs", "0075ca", None)])
+}
+
+#[test]
+fn dry_run_suggestion_pins_the_selected_local_deck() {
+    let isolation = Isolation::new("suggest-local");
+    let dir = workdir("suggest-local");
+    std::fs::write(dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    let mock = mock_github(dry_run_list());
+    let mut command =
+        isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    // The automatically selected local deck is pinned explicitly, so
+    // the rerun cannot re-resolve precedence.
+    assert!(
+        text.contains(
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file labels.json --prune"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn dry_run_suggestion_pins_the_resolved_global_path() {
+    let isolation = Isolation::new("suggest-global");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, GLOBAL_DECK).unwrap();
+    let dir = workdir("suggest-global"); // no local deck
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&["sync", REPO, "--dry-run"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    // The resolved global deck is pinned exactly. Whether it renders
+    // as a bare argument or the structured form depends on the
+    // platform's temporary-directory path; both must carry the exact
+    // path so the rerun cannot re-resolve precedence.
+    let command_form = format!("--file {} --no-prune", global.display());
+    let structured_form = format!("file:       {:?}", global);
+    assert!(
+        text.contains(&command_form) || text.contains(&structured_form),
+        "guidance must pin the exact global deck path: {text}"
+    );
+}
+
+#[test]
+fn global_backed_dry_run_guidance_stays_pinned_when_local_deck_appears() {
+    let isolation = Isolation::new("suggest-global-race");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, GLOBAL_DECK).unwrap();
+    let dir = workdir("suggest-global-race"); // no local deck yet
+
+    let mock = mock_github(dry_run_list());
+    let mut command =
+        isolation.command(&["sync", REPO, "--dry-run", "--prune"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+
+    // A local deck appears between the dry run and the rerun.
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+
+    // Following the pinned guidance (--file <the global deck used by
+    // the dry run, here in dry-run form to stay read-only) still
+    // reads the global deck: the remote matches it exactly, so the
+    // local deck's "bug" label must never surface in the plan.
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        global.to_str().unwrap(),
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    assert!(!text.contains("bug"), "local deck leaked in: {text}");
+    assert!(!text.contains("CREATE"), "plan must be empty: {text}");
+}
+
+#[test]
+fn dry_run_suggestion_repeats_explicit_file() {
+    let isolation = Isolation::new("suggest-explicit");
+    let dir = workdir("suggest-explicit");
+    std::fs::write(dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    std::fs::write(dir.join("custom.json"), LOCAL_DECK).unwrap();
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        "custom.json",
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    assert!(
+        text.contains(
+            "Run again without --dry-run to apply: labeldeck sync \
+             octocat/hello-world --file custom.json --prune"
+        ),
+        "{text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn dangling_local_deck_symlink_does_not_fall_back_to_global() {
+    use std::os::unix::fs::symlink;
+    let isolation = Isolation::new("dangling-local");
+    // A perfectly valid global deck exists...
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK)
+        .unwrap();
+    let dir = workdir("dangling-local");
+    // ...but the local entry is an authoritative (if dangling) symlink.
+    symlink("/definitely/not/here", dir.join("labels.json")).unwrap();
+
+    // The remote matches the global deck, so a silent fallback would
+    // exit 0; the local deck's authority must instead surface the read
+    // error for the local path.
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(
+        text.contains("could not read labels.json"),
+        "error must refer to the local deck: {text}"
+    );
+}
+
+#[test]
+fn dry_run_suggestion_renders_awkward_paths_safely() {
+    let isolation = Isolation::new("suggest-awkward");
+    let dir = workdir("suggest-awkward");
+    let awkward = dir.join("my labels.json");
+    std::fs::write(&awkward, GLOBAL_DECK).unwrap();
+
+    let mock = mock_github(dry_run_list());
+    let mut command = isolation.command(&[
+        "sync",
+        REPO,
+        "--file",
+        awkward.to_str().unwrap(),
+        "--dry-run",
+        "--prune",
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert_eq!(output.status.code(), Some(0));
+    let text = stderr(&output);
+    // The path itself is not plain, so no command form may be shown...
+    assert!(
+        !text.contains("labeldeck sync"),
+        "awkward path must not be rendered as a command: {text}"
+    );
+    // ...but the exact path and settings must be.
+    assert!(text.contains("file:       "), "{text}");
+    assert!(text.contains("my labels.json"), "{text}");
+    assert!(text.contains("repository: octocat/hello-world"), "{text}");
+    assert!(text.contains("pruning:    enabled"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn global_export_repairing_directory_permissions_never_truncates() {
+    use std::os::unix::fs::PermissionsExt;
+    let isolation = Isolation::new("export-global-repair");
+    let global = isolation.config_dir.join("labels.json");
+    std::fs::write(&global, LOCAL_DECK).unwrap();
+    let dir = workdir("export-global-repair");
+
+    // An unsearchable configuration directory makes naive existence
+    // checks report false; the atomic destination-open must still
+    // protect the existing deck after the directory is repaired.
+    std::fs::set_permissions(
+        &isolation.config_dir,
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&["export", REPO, "--global"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("refusing to overwrite"));
+
+    // The directory was repaired, but the deck is byte-for-byte intact.
+    assert_eq!(
+        std::fs::read_to_string(&global).unwrap(),
+        LOCAL_DECK,
+        "the existing global deck must not be truncated or replaced"
+    );
+
+    // With --force the same repaired-directory run intentionally
+    // replaces the deck.
+    let mock = mock_github(remote_page(&[]));
+    let mut command =
+        isolation.command(&["export", REPO, "--global", "--force"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success());
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), "[]\n");
+}
+
+#[test]
+fn local_default_overwrite_refusal_and_forced_replacement() {
+    let isolation = Isolation::new("refused-local");
+    let dir = workdir("refused-local");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&["export", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
+        LOCAL_DECK
+    );
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("labels.json")).unwrap(),
+        "[]\n"
+    );
+}
+
+#[test]
+fn explicit_file_overwrite_refusal_and_forced_replacement() {
+    let isolation = Isolation::new("refused-explicit");
+    let dir = workdir("refused-explicit");
+    let explicit = dir.join("chosen.json");
+    std::fs::write(&explicit, GLOBAL_DECK).unwrap();
+
+    let mock = mock_github(remote_page(&[("bug", "d73a4a", None)]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+    ]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(std::fs::read_to_string(&explicit).unwrap(), GLOBAL_DECK);
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+        "--force",
+    ]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    assert_eq!(std::fs::read_to_string(&explicit).unwrap(), "[]\n");
+}
+
+#[test]
+fn successful_exports_leave_no_staging_residue() {
+    let isolation = Isolation::new("staging-residue");
+    let dir = workdir("staging-residue");
+    std::fs::write(dir.join("labels.json"), LOCAL_DECK).unwrap();
+    let explicit = dir.join("chosen.json");
+    std::fs::write(&explicit, GLOBAL_DECK).unwrap();
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&[
+        "export",
+        REPO,
+        "--file",
+        explicit.to_str().unwrap(),
+        "--force",
+    ]);
+    command.current_dir(&dir);
+    assert!(run(against_mock(&mock, &mut command)).status.success());
+
+    // Successful exports never leave staging files behind.
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["chosen.json".to_string(), "labels.json".to_string()],
+        "no staging leftovers: {names:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn forced_export_through_a_symlink_replaces_the_target_end_to_end() {
+    use std::os::unix::fs::symlink;
+    let isolation = Isolation::new("export-symlink");
+    let dir = workdir("export-symlink");
+    let target = dir.join("shared-deck.json");
+    std::fs::write(&target, LOCAL_DECK).unwrap();
+    symlink("shared-deck.json", dir.join("labels.json")).unwrap();
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("Exported"), "report the export");
+    // The target received the new deck; the link survives untouched.
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "[]\n");
+    assert!(
+        std::fs::symlink_metadata(dir.join("labels.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the symlink must be preserved"
+    );
+}

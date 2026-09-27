@@ -1,18 +1,19 @@
 //! `labeldeck export`.
 
 use std::io::Write;
-use std::path::Path;
 
 use crate::cli::STDOUT_FILE;
 use crate::commands::{
     github_client, remote_labels, repo_spec, resolve_token,
 };
+use crate::deck;
 use crate::error::{Error, Result};
 
 pub fn run(
     repo: &str,
     file: Option<&std::path::PathBuf>,
     force: bool,
+    global: bool,
     no_proxy: bool,
 ) -> Result<i32> {
     // `--file -` writes canonical JSON to standard output; combining it
@@ -50,18 +51,28 @@ pub fn run(
         return Ok(0);
     }
 
-    let path: &std::path::Path = file
-        .map(std::path::PathBuf::as_path)
-        .unwrap_or_else(|| Path::new(crate::cli::DEFAULT_LABELS_FILE));
-    if path.exists() && !force {
-        return Err(Error::OutputExists {
-            path: path.to_path_buf(),
-        });
+    // For a global export, ensure/repair the configuration directory
+    // BEFORE touching the deck: a previously unsearchable directory can
+    // make a pre-check lie about whether the global deck exists.
+    if global {
+        crate::auth::ensure_config_dir(&config_dir).map_err(|e| {
+            Error::Io {
+                context: format!(
+                    "could not create or secure configuration directory {}",
+                    config_dir.display()
+                ),
+                message: e.to_string(),
+            }
+        })?;
     }
-    std::fs::write(path, json.as_bytes()).map_err(|e| Error::Io {
-        context: format!("could not write {}", path.display()),
-        message: e.to_string(),
-    })?;
+
+    let path = deck::export_destination(
+        file.map(std::path::PathBuf::as_path),
+        global,
+        &config_dir,
+    );
+    let outcome =
+        crate::staged_write::write_deck(&path, json.as_bytes(), force)?;
     eprintln!(
         "Exported {} labels from {}/{} to {}.",
         labels.len(),
@@ -69,5 +80,40 @@ pub fn run(
         repo.name,
         path.display()
     );
+    if let crate::staged_write::WriteOutcome::DurabilityUnconfirmed(error) =
+        outcome
+    {
+        eprintln!("{}", durability_warning(&error));
+    }
     Ok(0)
+}
+
+/// The warning shown when the deck was installed at the commit point
+/// but the post-commit destination-directory sync failed. The export
+/// itself succeeded; durability is merely unconfirmed.
+fn durability_warning(error: &std::io::Error) -> String {
+    format!(
+        "warning: the deck was installed successfully, but filesystem \
+         durability could not be confirmed because the destination \
+         directory could not be synchronized: {error}"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durability_warning_names_the_cause_and_keeps_success_clear() {
+        let warning = durability_warning(&std::io::Error::other(
+            "injected sync failure",
+        ));
+        assert!(
+            warning
+                .starts_with("warning: the deck was installed successfully"),
+            "{warning}"
+        );
+        assert!(warning.contains("could not be synchronized"), "{warning}");
+        assert!(warning.ends_with(": injected sync failure"), "{warning}");
+    }
 }

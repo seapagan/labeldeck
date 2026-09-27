@@ -45,6 +45,9 @@ $ labeldeck sync seapagan/lsplus --prune
 # Preview pruning without doing anything
 $ labeldeck sync seapagan/lsplus --prune --dry-run
 
+# Establish your personal default deck once
+$ labeldeck export seapagan/labeldeck --global
+
 # Use a different canonical file for any of the above
 $ labeldeck diff seapagan/lsplus --file other.json
 ```
@@ -52,7 +55,7 @@ $ labeldeck diff seapagan/lsplus --file other.json
 ## CLI surface
 
 ```text
-labeldeck [--no-proxy] export OWNER/REPO [--file PATH] [--force]
+labeldeck [--no-proxy] export OWNER/REPO [--file PATH | --global] [--force]
 labeldeck [--no-proxy] diff OWNER/REPO [--file PATH] [--prune | --no-prune]
 labeldeck [--no-proxy] sync OWNER/REPO [--file PATH] [--prune | --no-prune] [--dry-run]
 labeldeck [--no-proxy] auth login [--token-stdin]
@@ -60,19 +63,20 @@ labeldeck auth logout
 labeldeck auth status
 ```
 
-All three repository commands take `OWNER/REPO` as their first argument
-and read or write `./labels.json` unless `--file PATH` selects another
-file. The `--no-proxy` flag (usable anywhere) bypasses any configured
-HTTP proxy for that invocation; by default the normal proxy environment
+All three repository commands take `OWNER/REPO` as their first argument.
+Reads resolve the canonical deck as `--file PATH` → `./labels.json` →
+`<config dir>/labels.json` (the global default deck). The `--no-proxy`
+flag (usable anywhere) bypasses any configured HTTP proxy for that
+invocation; by default the normal proxy environment
 (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) is honoured.
 
 ### `export`
 
-Writes the repository's labels as canonical JSON to `./labels.json`. An existing file is **never** overwritten unless `--force` is given (this protection applies to any explicit `--file PATH` too). `--file -` writes the JSON to standard output instead — nothing else is printed there, so it is safe to pipe — and cannot be combined with `--force`, which is rejected as a usage error. Export works unauthenticated for public repositories (subject to GitHub's 60 requests/hour anonymous limit).
+Writes the repository's labels as canonical JSON to `./labels.json`. `--global` instead writes your **personal default deck** to `<labeldeck config directory>/labels.json` (the directory is created if needed) — see [the global default deck](#the-global-default-deck). An existing destination file is **never** overwritten unless `--force` is given, and that protection applies equally to the local default, `--global`, and any explicit `--file PATH`. `--file -` writes the JSON to standard output instead — nothing else is printed there, so it is safe to pipe — and cannot be combined with `--force` or `--global`, which are rejected as usage errors. Export works unauthenticated for public repositories (subject to GitHub's 60 requests/hour anonymous limit).
 
 ### `diff`
 
-Compares `./labels.json` (or the `--file` override) with the live repository and prints one line per label, without changing anything:
+Compares the resolved deck (`--file PATH` → `./labels.json` → global default) with the live repository and prints one line per label, without changing anything:
 
 ```text
 CREATE bug (color d73a4a, description "Something isn't working")
@@ -86,7 +90,7 @@ UNCHANGED feature
 
 ### `sync`
 
-Applies the plan read from `./labels.json` (or the `--file` override). Operations are ordered defensively: **all** creates and updates run first, and prune deletions start only after every one of them succeeded. Each mutation after the first waits about one second before its request, per GitHub's rate-limit guidance, so very large syncs take a little longer and stay within GitHub's secondary limits.
+Applies the plan read from the resolved deck (`--file PATH` → `./labels.json` → global default). Operations are ordered defensively: **all** creates and updates run first, and prune deletions start only after every one of them succeeded. Each mutation after the first waits about one second before its request, per GitHub's rate-limit guidance, so very large syncs take a little longer and stay within GitHub's secondary limits.
 
 GitHub's REST API is not transactional. If an operation fails mid-run, `labeldeck` stops, reports exactly what was applied, what failed, and what was skipped — it does not pretend to roll anything back.
 
@@ -99,6 +103,41 @@ GitHub's REST API is not transactional. If an operation fails mid-run, `labeldec
 | `0`  | Success. For `diff`: no differences under the effective prune setting. |
 | `1`  | `diff` found differences (traditional diff-style semantics, suitable for CI). |
 | `2`  | Error: usage, invalid file/config/repository spec, authentication, network, or API failure. |
+
+## The global default deck
+
+Keep one reusable personal label set in your labeldeck configuration
+directory (`~/.config/labeldeck/labels.json` on Linux,
+`~/Library/Application Support/labeldeck/labels.json` on macOS,
+`%APPDATA%\labeldeck\labels.json` on Windows; `LABELDECK_CONFIG_DIR`
+overrides the location):
+
+```console
+labeldeck export seapagan/labeldeck --global
+```
+
+`diff` and `sync` then use a repository-local `./labels.json` when one
+exists and automatically fall back to this global deck when it does not
+— so `labeldeck diff seapagan/foo` works in any directory you have not
+given its own deck.
+
+Precedence and safety rules:
+
+```text
+--file PATH → ./labels.json → <config dir>/labels.json
+```
+
+- An explicit `--file` is authoritative: if that file is missing,
+  unreadable, or invalid, the command fails with that path — it never
+  silently falls back to any default.
+- A present-but-invalid local `./labels.json` is likewise an error; the
+  global deck is used only when the local default is genuinely absent.
+- When neither default exists, the error names both checked locations
+  and suggests `labeldeck export OWNER/REPO` (local),
+  `labeldeck export OWNER/REPO --global`, or `--file PATH`.
+- Overwrite protection (`--force`) applies equally to the local deck,
+  the global deck, and explicit `--file` paths; a plain
+  `labeldeck export OWNER/REPO` never modifies the global deck.
 
 ## Canonical label file
 
