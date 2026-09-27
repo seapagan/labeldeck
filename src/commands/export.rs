@@ -425,6 +425,7 @@ mod tests {
         let (guard, path) = Dir::new("large.json");
         write_deck(&path, &payload, false).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), payload);
+        assert!(staging_leftovers(guard.0.path()).is_empty());
         let (guard, forced) = Dir::new("large-forced.json");
         std::fs::write(&forced, b"tiny").unwrap();
         write_deck(&forced, &payload, true).unwrap();
