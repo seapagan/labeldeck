@@ -343,8 +343,7 @@ mod tests {
         let global = sandbox.deck("global-home");
         let explicit = None;
         assert_eq!(
-            resolve_read_with(explicit, &local, &global, probe_entry)
-                .unwrap(),
+            resolve_read_with(explicit, &local, &global, probe_entry).unwrap(),
             DeckSelection::Local(local)
         );
     }
@@ -359,8 +358,7 @@ mod tests {
         std::fs::write(&local, "not json").unwrap();
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, &local, &global, probe_entry)
-                .unwrap(),
+            resolve_read_with(None, &local, &global, probe_entry).unwrap(),
             DeckSelection::Local(local)
         );
     }
