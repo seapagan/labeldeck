@@ -1,6 +1,3 @@
-[env]
-MSRV_VERSION = "1.88.0"
-
 [tasks.format]
 description = "Check Rust formatting"
 command = "cargo"
@@ -50,21 +47,21 @@ description = "Verify the crate packages cleanly"
 command = "cargo"
 args = ["package", "--locked"]
 
-[tasks.msrv-check]
-private = true
-install_crate = false
-command = "cargo"
-args = [
-  "+${MSRV_VERSION}",
-  "check",
-  "--all-targets",
-  "--all-features",
-  "--locked",
-]
-
 [tasks.msrv]
-description = "Check against the minimum supported Rust version"
-dependencies = ["msrv-check"]
+description = "Check against the minimum supported Rust version declared in Cargo.toml"
+script = '''
+#!/bin/sh
+set -eu
+
+msrv="$(sed -n 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' Cargo.toml)"
+
+if [ -z "$msrv" ]; then
+    echo "error: could not determine rust-version from Cargo.toml" >&2
+    exit 1
+fi
+
+exec cargo "+$msrv" check --all-targets --all-features --locked
+'''
 
 [tasks.audit]
 description = "Audit dependencies for known vulnerabilities (cargo audit)"

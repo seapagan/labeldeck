@@ -17,7 +17,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.98.1
-  MSRV_VERSION: "1.88.0"
   RUSTDOCFLAGS: "-D warnings"
 
 jobs:
@@ -33,15 +32,26 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        shell: bash
+        run: |
+          msrv="$(sed -n 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' Cargo.toml)"
+          if [[ -z "$msrv" ]]; then
+            printf 'error: could not determine rust-version from Cargo.toml\n' >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$msrv" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust MSRV
         uses: seapagan/setup-rust@a91f5a34c552642ece0e8cef8b5e9226f41a3c0b # v1.0.0
         with:
-          toolchain: ${{ env.MSRV_VERSION }}
+          toolchain: ${{ steps.msrv.outputs.version }}
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          prefix-key: v1-${{ runner.os }}-rust-${{ env.MSRV_VERSION }}
+          prefix-key: v1-${{ runner.os }}-rust-${{ steps.msrv.outputs.version }}
           shared-key: msrv
 
       - name: Install Cargo Make

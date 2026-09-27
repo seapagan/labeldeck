@@ -1,14 +1,1 @@
 # cargo-audit configuration.
-#
-# RUSTSEC-2026-0009 (time: stack-exhaustion DoS) is ignored deliberately:
-#
-# - `time` enters Cargo.lock only through ureq's optional `cookies`
-#   feature, which labeldeck does NOT enable; `cargo tree -i time
-#   --target all` confirms it is compiled for none of our targets.
-# - The fixed release (time 0.3.47) requires Rust 1.88, above labeldeck's
-#   proven MSRV of 1.85.1, so the lock cannot move to it yet.
-#
-# Remove this ignore when the MSRV reaches 1.88 or the dependency leaves
-# the lockfile.
-[advisories]
-ignore = ["RUSTSEC-2026-0009"]
