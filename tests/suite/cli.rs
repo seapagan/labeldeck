@@ -1532,3 +1532,31 @@ fn refused_overwrites_leave_contents_untouched() {
         "no staging leftovers: {names:?}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn forced_export_through_a_symlink_replaces_the_target_end_to_end() {
+    use std::os::unix::fs::symlink;
+    let isolation = Isolation::new("export-symlink");
+    let dir = workdir("export-symlink");
+    let target = dir.join("shared-deck.json");
+    std::fs::write(&target, LOCAL_DECK).unwrap();
+    symlink("shared-deck.json", dir.join("labels.json")).unwrap();
+
+    let mock = mock_github(remote_page(&[]));
+    let mut command = isolation.command(&["export", REPO, "--force"]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    mock.assert_satisfied();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("Exported"), "report the export");
+    // The target received the new deck; the link survives untouched.
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "[]\n");
+    assert!(
+        std::fs::symlink_metadata(dir.join("labels.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the symlink must be preserved"
+    );
+}

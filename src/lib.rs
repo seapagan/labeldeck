@@ -13,4 +13,5 @@ pub mod error;
 pub mod github;
 pub mod labels;
 pub mod plan;
+pub(crate) mod staged_write;
 pub mod sync;
