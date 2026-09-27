@@ -167,16 +167,19 @@ mod tests {
     use super::*;
 
     struct Sandbox {
+        // The TempDir guard cleans up on drop; the root lives beneath it.
+        _guard: tempfile::TempDir,
         root: PathBuf,
     }
 
     impl Sandbox {
         fn new() -> Self {
+            let guard = tempfile::tempdir().expect("temp dir");
+            let root = guard.path().join("labeldeck-deck-test");
+            std::fs::create_dir_all(&root).unwrap();
             Self {
-                root: tempfile::tempdir()
-                    .expect("temp dir")
-                    .keep()
-                    .join("labeldeck-deck-test"),
+                _guard: guard,
+                root,
             }
         }
 
@@ -195,12 +198,6 @@ mod tests {
             )
             .unwrap();
             path
-        }
-    }
-
-    impl Drop for Sandbox {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
         }
     }
 
