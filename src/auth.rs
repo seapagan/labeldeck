@@ -56,13 +56,13 @@ pub fn resolve_token(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Option<ResolvedToken> {
     for name in TOKEN_ENV_VARS {
-        if let Some(value) = env(name) {
-            if !value.trim().is_empty() {
-                return Some(ResolvedToken {
-                    token: Arc::from(value.trim()),
-                    source: TokenSource::Environment(name),
-                });
-            }
+        if let Some(value) = env(name)
+            && !value.trim().is_empty()
+        {
+            return Some(ResolvedToken {
+                token: Arc::from(value.trim()),
+                source: TokenSource::Environment(name),
+            });
         }
     }
     read_stored_token(config_dir).map(|token| ResolvedToken {

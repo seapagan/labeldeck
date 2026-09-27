@@ -49,10 +49,10 @@ pub struct Config {
 pub fn config_dir(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PathBuf, ConfigError> {
-    if let Some(dir) = env(CONFIG_DIR_ENV) {
-        if !dir.trim().is_empty() {
-            return Ok(PathBuf::from(dir));
-        }
+    if let Some(dir) = env(CONFIG_DIR_ENV)
+        && !dir.trim().is_empty()
+    {
+        return Ok(PathBuf::from(dir));
     }
     dirs::config_dir()
         .map(|base| base.join("labeldeck"))
