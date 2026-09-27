@@ -383,14 +383,14 @@ mod tests {
     fn probe_entry_reports_regular_files_as_present() {
         let sandbox = Sandbox::new();
         let path = sandbox.deck("probe");
-        assert_eq!(probe_entry(&path).unwrap(), true);
+        assert!(probe_entry(&path).unwrap());
     }
 
     #[test]
     fn probe_entry_reports_missing_paths_as_absent() {
         let sandbox = Sandbox::new();
         let path = sandbox.dir("empty").join(DECK_FILE_NAME);
-        assert_eq!(probe_entry(&path).unwrap(), false);
+        assert!(!probe_entry(&path).unwrap());
     }
 
     #[cfg(unix)]
@@ -420,7 +420,7 @@ mod tests {
         let link = dir.join(DECK_FILE_NAME);
         std::os::unix::fs::symlink("/definitely/not/here", &link).unwrap();
         // The directory entry exists even though the target never will.
-        assert_eq!(probe_entry(&link).unwrap(), true);
+        assert!(probe_entry(&link).unwrap());
     }
 
     #[test]
