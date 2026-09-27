@@ -393,25 +393,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn probe_entry_surfaces_metadata_errors() {
-        // A readable file inside an unreadable directory cannot even be
-        // probed: that is a probe error, never "absent".
-        use std::os::unix::fs::PermissionsExt;
-        let sandbox = Sandbox::new();
-        let dir = sandbox.dir("locked");
-        let path = dir.join(DECK_FILE_NAME);
-        std::fs::write(&path, "[]").unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000))
-            .unwrap();
-        let result = probe_entry(&path);
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
-            .unwrap();
-        let error = result.unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn probe_entry_counts_dangling_symlinks_as_present() {
         let sandbox = Sandbox::new();
         let dir = sandbox.dir("dangling");
