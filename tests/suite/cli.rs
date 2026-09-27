@@ -1295,3 +1295,29 @@ fn dry_run_suggestion_repeats_explicit_file() {
         "{text}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn dangling_local_deck_symlink_does_not_fall_back_to_global() {
+    use std::os::unix::fs::symlink;
+    let isolation = Isolation::new("dangling-local");
+    // A perfectly valid global deck exists...
+    std::fs::write(isolation.config_dir.join("labels.json"), GLOBAL_DECK).unwrap();
+    let dir = workdir("dangling-local");
+    // ...but the local entry is an authoritative (if dangling) symlink.
+    symlink("/definitely/not/here", dir.join("labels.json")).unwrap();
+
+    // The remote matches the global deck, so a silent fallback would
+    // exit 0; the local deck's authority must instead surface the read
+    // error for the local path.
+    let mock = mock_github(remote_page(&[("docs", "0075ca", None)]));
+    let mut command = isolation.command(&["diff", REPO]);
+    command.current_dir(&dir);
+    let output = run(against_mock(&mock, &mut command));
+    assert_eq!(output.status.code(), Some(2));
+    let text = stderr(&output);
+    assert!(
+        text.contains("could not read labels.json"),
+        "error must refer to the local deck: {text}"
+    );
+}

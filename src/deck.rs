@@ -92,15 +92,33 @@ fn probe_error(path: &Path, error: std::io::Error) -> Error {
     }
 }
 
+/// The production existence probe: examine the directory entry itself,
+/// without following symlinks.
+///
+/// A filesystem entry named `labels.json` — including a symlink whose
+/// target is missing — makes the local deck authoritative; whether it
+/// can then be opened/read/parsed is the read step's concern, never a
+/// reason to fall back to the global deck. Only a confirmed `NotFound`
+/// counts as absence; every other metadata error is a probe error.
+pub fn probe_entry(path: &Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Resolve the deck a read command (`diff`/`sync`) should use, and how
 /// it was chosen.
 ///
 /// Precedence: an explicit `--file` path verbatim; then the local
-/// `./labels.json` if it exists; then the global deck if it exists.
-/// Fallback happens only on a *confirmed* absence: an existence probe
-/// that fails with an I/O error is reported for the path probed. When
-/// neither default exists the error names both checked locations and
-/// how to fix the situation.
+/// `./labels.json` if a filesystem entry with that name exists; then
+/// the global deck likewise. Fallback happens only on a *confirmed*
+/// absence: an existence probe that fails with an I/O error is
+/// reported for the path probed. When neither default exists the error
+/// names both checked locations and how to fix the situation.
 pub fn resolve_read_selection(
     explicit: Option<&Path>,
     config_dir: &Path,
@@ -109,7 +127,7 @@ pub fn resolve_read_selection(
         explicit,
         &local_deck_path(),
         &global_deck_path(config_dir),
-        Path::try_exists,
+        probe_entry,
     )
 }
 
@@ -325,7 +343,7 @@ mod tests {
         let global = sandbox.deck("global-home");
         let explicit = None;
         assert_eq!(
-            resolve_read_with(explicit, &local, &global, Path::try_exists)
+            resolve_read_with(explicit, &local, &global, probe_entry)
                 .unwrap(),
             DeckSelection::Local(local)
         );
@@ -341,7 +359,7 @@ mod tests {
         std::fs::write(&local, "not json").unwrap();
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, &local, &global, Path::try_exists)
+            resolve_read_with(None, &local, &global, probe_entry)
                 .unwrap(),
             DeckSelection::Local(local)
         );
@@ -353,10 +371,56 @@ mod tests {
         let absent_local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, &absent_local, &global, Path::try_exists,)
+            resolve_read_with(None, &absent_local, &global, probe_entry,)
                 .unwrap(),
             DeckSelection::Global(global)
         );
+    }
+
+    // ----- production probe (symlink_metadata semantics) ------------
+
+    #[test]
+    fn probe_entry_reports_regular_files_as_present() {
+        let sandbox = Sandbox::new();
+        let path = sandbox.deck("probe");
+        assert_eq!(probe_entry(&path).unwrap(), true);
+    }
+
+    #[test]
+    fn probe_entry_reports_missing_paths_as_absent() {
+        let sandbox = Sandbox::new();
+        let path = sandbox.dir("empty").join(DECK_FILE_NAME);
+        assert_eq!(probe_entry(&path).unwrap(), false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_entry_surfaces_metadata_errors() {
+        // A readable file inside an unreadable directory cannot even be
+        // probed: that is a probe error, never "absent".
+        use std::os::unix::fs::PermissionsExt;
+        let sandbox = Sandbox::new();
+        let dir = sandbox.dir("locked");
+        let path = dir.join(DECK_FILE_NAME);
+        std::fs::write(&path, "[]").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000))
+            .unwrap();
+        let result = probe_entry(&path);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_entry_counts_dangling_symlinks_as_present() {
+        let sandbox = Sandbox::new();
+        let dir = sandbox.dir("dangling");
+        let link = dir.join(DECK_FILE_NAME);
+        std::os::unix::fs::symlink("/definitely/not/here", &link).unwrap();
+        // The directory entry exists even though the target never will.
+        assert_eq!(probe_entry(&link).unwrap(), true);
     }
 
     #[test]
