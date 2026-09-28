@@ -33,18 +33,7 @@ pub fn run(
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
 
-    let client = if dry_run {
-        // Dry runs only read; they never need credentials. A token
-        // that is already available still grants read access to
-        // private repositories.
-        github_client(resolve_token(&config_dir).as_ref(), no_proxy)
-    } else {
-        let stdin = std::io::stdin();
-        let mut locked = stdin.lock();
-        let credentials =
-            credentials_for_write(&config_dir, &mut locked, no_proxy)?;
-        github_client(Some(&credentials), no_proxy)
-    };
+    let client = client_for(&config_dir, dry_run, no_proxy)?;
 
     // The full desired set is read from the source, and the target's
     // current labels are read, before anything is planned or mutated:
@@ -71,6 +60,28 @@ pub fn run(
             source.owner, source.name, target.owner, target.name
         ),
     )
+}
+
+/// Build the client a copy runs with.
+///
+/// Dry runs only read, so they use any already-available token (which
+/// still grants read access to private repositories) and never demand
+/// write credentials; a real copy goes through the interactive
+/// first-use login flow when no token exists.
+fn client_for(
+    config_dir: &std::path::Path,
+    dry_run: bool,
+    no_proxy: bool,
+) -> Result<GitHubClient> {
+    if dry_run {
+        Ok(github_client(resolve_token(config_dir).as_ref(), no_proxy))
+    } else {
+        let stdin = std::io::stdin();
+        let mut locked = stdin.lock();
+        let credentials =
+            credentials_for_write(config_dir, &mut locked, no_proxy)?;
+        Ok(github_client(Some(&credentials), no_proxy))
+    }
 }
 
 /// Whether two parsed specifications denote the same repository.
