@@ -1,6 +1,8 @@
 //! Shared plumbing for command implementations.
 
+mod apply;
 pub mod auth;
+pub mod copy;
 pub mod diff;
 pub mod export;
 pub mod sync;
@@ -94,4 +96,27 @@ pub fn credentials_for_write(
         ));
     }
     auth::prompt_and_store_login(config_dir, stdin, no_proxy)
+}
+
+/// Whether a value can appear as a bare argument in a suggested command
+/// without any risk of changing argument boundaries or meaning.
+///
+/// Conservatively allowlisted: plain ASCII letters, digits, `.`, `_`,
+/// `-`, and `/` (a path separator on every supported platform), and it
+/// must not be empty or begin with `-` (which would read as a flag).
+/// Anything else — spaces, quotes, backslashes, shell
+/// metacharacters, non-ASCII — is rendered in a structured form
+/// instead, because quoting rules differ between POSIX shells,
+/// PowerShell, and CMD and no single quoted form is safe everywhere.
+pub(crate) fn is_plain_argument_token(token: &str) -> bool {
+    !token.is_empty()
+        && !token.starts_with('-')
+        && token.bytes().all(is_plain_argument_byte)
+}
+
+/// Whether one byte may appear in a bare-argument token: ASCII
+/// alphanumerics plus `.`, `_`, `-`, and `/` (a path separator on
+/// every supported platform).
+fn is_plain_argument_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"._-/".contains(&byte)
 }

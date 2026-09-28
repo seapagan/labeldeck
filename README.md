@@ -45,6 +45,12 @@ $ labeldeck sync seapagan/lsplus --prune
 # Preview pruning without doing anything
 $ labeldeck sync seapagan/lsplus --prune --dry-run
 
+# Copy a template repository's labels straight onto a new repository
+$ labeldeck copy seapagan/template seapagan/new-project
+
+# Preview that copy (or its pruning) without changing anything
+$ labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
+
 # Establish your personal default deck once
 $ labeldeck export seapagan/labeldeck --global
 
@@ -58,12 +64,14 @@ $ labeldeck diff seapagan/lsplus --file other.json
 labeldeck [--no-proxy] export OWNER/REPO [--file PATH | --global] [--force]
 labeldeck [--no-proxy] diff OWNER/REPO [--file PATH] [--prune | --no-prune]
 labeldeck [--no-proxy] sync OWNER/REPO [--file PATH] [--prune | --no-prune] [--dry-run]
+labeldeck [--no-proxy] copy SOURCE TARGET [--prune | --no-prune] [--dry-run]
 labeldeck [--no-proxy] auth login [--token-stdin]
 labeldeck auth logout
 labeldeck auth status
 ```
 
-All three repository commands take `OWNER/REPO` as their first argument.
+All repository commands take `OWNER/REPO` arguments (`copy` takes two:
+`SOURCE` then `TARGET`; URLs are not accepted).
 Reads resolve the canonical deck as `--file PATH` → `./labels.json` →
 `<config dir>/labels.json` (the global default deck). The `--no-proxy`
 flag (usable anywhere) bypasses any configured HTTP proxy for that
@@ -95,6 +103,12 @@ Applies the plan read from the resolved deck (`--file PATH` → `./labels.json` 
 GitHub's REST API is not transactional. If an operation fails mid-run, `labeldeck` stops, reports exactly what was applied, what failed, and what was skipped — it does not pretend to roll anything back.
 
 `--dry-run` performs **zero** mutations: it reads the repository, prints the plan, and exits successfully.
+
+### `copy`
+
+Copies the labels currently configured on one repository directly to another — no local canonical file is involved or resolved. `labeldeck copy SOURCE TARGET` reads `SOURCE`'s labels, reads `TARGET`'s labels, and then applies exactly the same reconciliation `sync` uses: missing labels are created, changed labels are updated in place, and target-only labels are kept unless pruning is enabled (with the same `--prune`/`--no-prune`/`config.toml` precedence). Both repositories are read completely before any mutation starts, and `SOURCE` is **only ever read** — it is never modified, and a failure fetching either repository leaves `TARGET` untouched.
+
+`--dry-run` performs **zero** mutations: it prints the plan and the command to apply it. A normal copy needs write access to `TARGET` and read access to `SOURCE` with the same token; a public `SOURCE` (and public `TARGET` for `--dry-run`) can be read anonymously. Copying a repository onto itself (`labeldeck copy OWNER/REPO OWNER/REPO`, including case differences) is rejected as a usage error.
 
 ### Exit codes
 
@@ -188,6 +202,8 @@ Token permissions needed:
 | Read labels (private repo) | `repo` (or `public_repo` for public only) | Issues: read + Metadata: read |
 | Create/update/delete labels | `repo` (or `public_repo` for public only) | Issues: write + Metadata: read |
 
+For `copy`, one token covers both sides: it needs write access to `TARGET` and (for a private `SOURCE`) read access to it.
+
 ### Token storage and security
 
 - The stored token lives in its own file (`token`) inside the labeldeck configuration directory — **never** in `config.toml`.
@@ -204,7 +220,7 @@ Token permissions needed:
 prune = true
 ```
 
-- `prune` (optional, default `false`): delete target-only labels during `sync`.
+- `prune` (optional, default `false`): delete target-only labels during `sync` and `copy`.
 - Precedence: `--prune`/`--no-prune` on the command line beats the config file, which beats the built-in default. A user who has `prune = true` can still pass `--no-prune` for one invocation.
 - Unknown keys and malformed files are hard errors with the file path and a precise reason.
 

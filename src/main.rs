@@ -43,6 +43,19 @@ fn main() {
             dry_run,
             cli.no_proxy,
         ),
+        Command::Copy {
+            source,
+            target,
+            prune,
+            no_prune,
+            dry_run,
+        } => commands::copy::run(
+            &source,
+            &target,
+            labeldeck::cli::prune_override(prune, no_prune),
+            dry_run,
+            cli.no_proxy,
+        ),
         Command::Auth(auth) => match auth {
             AuthCommand::Login { token_stdin } => {
                 commands::auth::login(token_stdin, cli.no_proxy)

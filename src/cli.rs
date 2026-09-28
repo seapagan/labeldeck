@@ -8,15 +8,18 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "labeldeck",
     version,
-    about = "Export, diff, and safely synchronize GitHub repository \
-             labels from a canonical JSON file",
+    about = "Export, copy, diff, and safely synchronize GitHub \
+             repository labels",
     long_about = "labeldeck manages GitHub repository labels against a \
                   canonical JSON file.\n\nLabels missing on GitHub are \
                   created; labels whose colour or description differ are \
                   updated in place (never deleted and recreated, so \
                   issue and pull-request associations survive); \
                   target-only labels are retained unless pruning is \
-                  enabled."
+                  enabled.\n\n`labeldeck copy SOURCE TARGET` applies \
+                  one repository's labels directly to another \
+                  repository with the same reconciliation, without a \
+                  local canonical file."
 )]
 pub struct Cli {
     /// Bypass any configured HTTP proxy for this invocation.
@@ -90,6 +93,33 @@ pub enum Command {
         /// default deck.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
+        /// Delete target-only labels (overrides the configuration).
+        #[arg(long, conflicts_with = "no_prune")]
+        prune: bool,
+        /// Keep target-only labels (overrides the configuration).
+        #[arg(long)]
+        no_prune: bool,
+        /// Show what would happen without applying any changes.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Copy labels directly from one repository to another
+    #[command(
+        after_help = "Makes the source repository's current labels the \
+                      desired set for the target, reconciled exactly as \
+                      sync would: missing labels are created, changed \
+                      labels are updated in place, and target-only \
+                      labels are kept unless pruning is enabled. The \
+                      source repository is only ever read; no canonical \
+                      deck is used or resolved. --dry-run shows the \
+                      plan without changing anything."
+    )]
+    Copy {
+        /// Repository whose labels are copied, as OWNER/REPO.
+        source: String,
+        /// Repository the labels are applied to, as OWNER/REPO.
+        target: String,
         /// Delete target-only labels (overrides the configuration).
         #[arg(long, conflicts_with = "no_prune")]
         prune: bool,
