@@ -329,25 +329,29 @@ pub fn labels_json(labels: &[(&str, &str, Option<&str>)]) -> String {
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
-/// Per-test isolation: a throwaway configuration directory plus a
-/// command builder that scrubbed every environment variable labeldeck
-/// reads besides the ones a test sets explicitly.
+/// Per-test isolation: a securely created throwaway configuration
+/// directory plus a command builder that scrubbed every environment
+/// variable labeldeck reads besides the ones a test sets explicitly.
+///
+/// The `tempfile::TempDir` owns the directory: it is created with an
+/// unguessable name and restrictive permissions and removed when the
+/// isolation is dropped.
 pub struct Isolation {
     pub config_dir: PathBuf,
+    /// Keeps the configuration directory alive until drop.
+    _dir: tempfile::TempDir,
 }
 
 impl Isolation {
     pub fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "labeldeck-cli-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self { config_dir: dir }
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("labeldeck-cli-{tag}-"))
+            .tempdir()
+            .expect("create isolated config directory");
+        Self {
+            config_dir: dir.path().to_path_buf(),
+            _dir: dir,
+        }
     }
 
     pub fn command(&self, args: &[&str]) -> Command {
@@ -368,12 +372,6 @@ impl Isolation {
             .env_remove("NO_PROXY")
             .env_remove("no_proxy");
         command
-    }
-}
-
-impl Drop for Isolation {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.config_dir).ok();
     }
 }
 
