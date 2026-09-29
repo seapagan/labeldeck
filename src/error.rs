@@ -30,6 +30,16 @@ pub enum Error {
     Config(#[from] crate::config::ConfigError),
     #[error("{0}")]
     Github(#[from] crate::github::GithubError),
+    /// Fetching a repository's labels failed, with the repository's
+    /// role in the command (`source` or `target`) and identity so the
+    /// diagnostic says which side of a `copy` failed.
+    #[error("fetching labels from the {role} repository {repo}: {source}")]
+    LabelsFetch {
+        role: &'static str,
+        repo: String,
+        #[source]
+        source: crate::github::GithubError,
+    },
     /// Authentication is required but unavailable.
     #[error("{0}")]
     Auth(String),

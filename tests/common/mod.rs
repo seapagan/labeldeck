@@ -323,3 +323,92 @@ pub fn labels_json(labels: &[(&str, &str, Option<&str>)]) -> String {
         .collect();
     format!("[{}]", entries.join(","))
 }
+
+// ----- Binary-level test harness -----------------------------------------
+
+use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
+
+/// Per-test isolation: a securely created throwaway configuration
+/// directory plus a command builder that scrubbed every environment
+/// variable labeldeck reads besides the ones a test sets explicitly.
+///
+/// The `tempfile::TempDir` owns the directory: it is created with an
+/// unguessable name and restrictive permissions and removed when the
+/// isolation is dropped.
+pub struct Isolation {
+    pub config_dir: PathBuf,
+    /// Keeps the configuration directory alive until drop.
+    _dir: tempfile::TempDir,
+}
+
+impl Isolation {
+    pub fn new(tag: &str) -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("labeldeck-cli-{tag}-"))
+            .tempdir()
+            .expect("create isolated config directory");
+        Self {
+            config_dir: dir.path().to_path_buf(),
+            _dir: dir,
+        }
+    }
+
+    pub fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_labeldeck"));
+        command
+            .args(args)
+            .env("LABELDECK_CONFIG_DIR", &self.config_dir)
+            .env_remove("LABELDECK_TOKEN")
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
+            .env_remove("LABELDECK_API")
+            .env_remove("HTTP_PROXY")
+            .env_remove("http_proxy")
+            .env_remove("HTTPS_PROXY")
+            .env_remove("https_proxy")
+            .env_remove("ALL_PROXY")
+            .env_remove("all_proxy")
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy");
+        command
+    }
+}
+
+/// Run a labeldeck command to completion, capturing both streams.
+pub fn run(command: &mut Command) -> Output {
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run labeldeck binary")
+}
+
+pub fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+pub fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// Point a labeldeck command at a mock GitHub API.
+pub fn against_mock<'a>(
+    mock: &MockGitHub,
+    command: &'a mut Command,
+) -> &'a mut Command {
+    command.env("LABELDECK_API", mock.base_url())
+}
+
+/// Write a canonical label file inside the isolated config directory.
+pub fn canonical_file(dir: &Isolation, name: &str, contents: &str) -> PathBuf {
+    let path = dir.config_dir.join(name);
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+/// Install a config.toml in the isolated config directory.
+pub fn write_config(isolation: &Isolation, contents: &str) {
+    std::fs::write(isolation.config_dir.join("config.toml"), contents)
+        .unwrap();
+}

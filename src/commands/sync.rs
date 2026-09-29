@@ -1,14 +1,12 @@
 //! `labeldeck sync` — apply a canonical label set to a repository.
 
-use crate::commands::diff;
+use crate::commands::apply;
 use crate::commands::{
     config_dir, credentials_for_write, github_client, read_canonical,
     remote_labels, repo_spec, resolve_token,
 };
 use crate::error::Result;
 use crate::github::RepoSpec;
-use crate::plan;
-use crate::sync as sync_engine;
 
 pub fn run(
     repo: &str,
@@ -32,12 +30,12 @@ pub fn run(
         let client =
             github_client(resolve_token(&config_dir).as_ref(), no_proxy);
         let remote = remote_labels(&client, &repo)?;
-        let result = plan::plan(&canonical, &remote, prune);
-        eprintln!("Dry run: no changes were made.");
-        diff::print_plan(&result);
-        eprintln!("{}", diff::summarize(&result));
-        eprintln!("{}", follow_up_command(&repo, &selection, prune));
-        return Ok(0);
+        return apply::dry_run(
+            &canonical,
+            &remote,
+            prune,
+            &follow_up_command(&repo, &selection, prune),
+        );
     }
 
     let stdin = std::io::stdin();
@@ -47,77 +45,14 @@ pub fn run(
     let client = github_client(Some(&credentials), no_proxy);
 
     let remote = remote_labels(&client, &repo)?;
-    let result = plan::plan(&canonical, &remote, prune);
-
-    if prune && !result.deletes.is_empty() {
-        eprintln!(
-            "warning: pruning will DELETE {} target-only label(s); \
-             deleting a label removes it from existing issues and pull \
-             requests.",
-            result.deletes.len()
-        );
-    }
-
-    let mut printer = StderrReporter;
-    let outcome = sync_engine::execute(&client, &repo, &result, &mut printer);
-
-    if outcome.is_success() {
-        eprintln!(
-            "Synchronized {}/{}: {} created, {} updated, {} deleted.",
-            repo.owner,
-            repo.name,
-            result.creates.len(),
-            result.updates.len(),
-            result.deletes.len(),
-        );
-        return Ok(0);
-    }
-
-    let failure = outcome.failure.as_ref().expect("failure implies Some");
-    for applied in &outcome.applied {
-        eprintln!("applied: {applied}");
-    }
-    eprintln!("failed:   {}", failure.operation);
-    eprintln!("reason:   {}", failure.error);
-    for skipped in &outcome.skipped {
-        eprintln!("skipped:  {skipped}");
-    }
-    eprintln!(
-        "GitHub does not support transactional label updates; the \
-         operations listed as applied remain in effect."
-    );
-    Ok(2)
-}
-
-struct StderrReporter;
-
-impl sync_engine::Reporter for StderrReporter {
-    fn operation(&mut self, description: &str) {
-        eprintln!("labeldeck: {description}...");
-    }
-}
-
-/// Whether a path can appear as a bare argument in a suggested command
-/// without any risk of changing argument boundaries or meaning.
-///
-/// Conservatively allowlisted: plain ASCII letters, digits, `.`, `_`,
-/// `-`, and `/` (a path separator on every supported platform), and it
-/// must not be empty or begin with `-` (which would read as a flag).
-/// Anything else — spaces, quotes, backslashes, shell
-/// metacharacters, non-ASCII — is rendered in the structured form
-/// instead, because quoting rules differ between POSIX shells,
-/// PowerShell, and CMD and no single quoted form is safe everywhere.
-fn is_plain_path_token(path: &str) -> bool {
-    !path.is_empty()
-        && !path.starts_with('-')
-        && path.bytes().all(is_plain_path_byte)
-}
-
-/// Whether one byte may appear in a bare-argument path token: ASCII
-/// alphanumerics plus `.`, `_`, `-`, and `/` (a path separator on
-/// every supported platform).
-fn is_plain_path_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || b"._-/".contains(&byte)
+    apply::execute(
+        &client,
+        &repo,
+        &canonical,
+        &remote,
+        prune,
+        &format!("Synchronized {}/{}", repo.owner, repo.name),
+    )
 }
 
 /// The "run again" guidance shown after `--dry-run`, pinned to the
@@ -148,7 +83,7 @@ fn follow_up_command(
     // escaping so newlines, tabs, control characters, and
     // non-UTF-8 bytes stay visible as escapes instead of
     // visually restructuring the diagnostic.
-    if is_plain_path_token(&path.to_string_lossy()) {
+    if super::is_plain_argument_token(&path.to_string_lossy()) {
         format!(
             "Run again without --dry-run to apply: labeldeck sync \
              {}/{} --file {} {prune_flag}",

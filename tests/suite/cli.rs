@@ -2,91 +2,14 @@
 //! against the local mock GitHub API.
 
 use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::Stdio;
 
-use crate::common::{Expectation, MockGitHub, labels_json, mock_github};
+use crate::common::{
+    Expectation, Isolation, against_mock, canonical_file, labels_json,
+    mock_github, run, stderr, stdout, write_config,
+};
 
-const BIN: &str = env!("CARGO_BIN_EXE_labeldeck");
 const REPO: &str = "octocat/hello-world";
-
-struct Isolation {
-    config_dir: PathBuf,
-}
-
-impl Isolation {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "labeldeck-cli-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self { config_dir: dir }
-    }
-
-    fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BIN);
-        command
-            .args(args)
-            .env("LABELDECK_CONFIG_DIR", &self.config_dir)
-            .env_remove("LABELDECK_TOKEN")
-            .env_remove("GH_TOKEN")
-            .env_remove("GITHUB_TOKEN")
-            .env_remove("LABELDECK_API")
-            .env_remove("HTTP_PROXY")
-            .env_remove("http_proxy")
-            .env_remove("HTTPS_PROXY")
-            .env_remove("https_proxy")
-            .env_remove("ALL_PROXY")
-            .env_remove("all_proxy")
-            .env_remove("NO_PROXY")
-            .env_remove("no_proxy");
-        command
-    }
-}
-
-impl Drop for Isolation {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.config_dir).ok();
-    }
-}
-
-fn run(command: &mut Command) -> Output {
-    command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("run labeldeck binary")
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn against_mock<'a>(
-    mock: &MockGitHub,
-    command: &'a mut Command,
-) -> &'a mut Command {
-    command.env("LABELDECK_API", mock.base_url())
-}
-
-fn canonical_file(dir: &Isolation, name: &str, contents: &str) -> PathBuf {
-    let path = dir.config_dir.join(name);
-    std::fs::write(&path, contents).unwrap();
-    path
-}
-fn write_config(isolation: &Isolation, contents: &str) {
-    std::fs::write(isolation.config_dir.join("config.toml"), contents)
-        .unwrap();
-}
 
 #[test]
 fn help_exits_zero_and_lists_commands() {
@@ -94,8 +17,18 @@ fn help_exits_zero_and_lists_commands() {
     let output = run(&mut isolation.command(&["--help"]));
     assert!(output.status.success());
     let text = stdout(&output);
-    for command in ["export", "diff", "sync", "auth"] {
-        assert!(text.contains(command), "help must mention {command}");
+    // The long description also mentions `copy`, so assert against the
+    // generated command list rather than the whole help text.
+    let command_list = text
+        .split_once("Commands:")
+        .and_then(|(_, rest)| rest.split_once("Options:"))
+        .map(|(commands, _)| commands)
+        .expect("help must list commands");
+    for command in ["export", "copy", "diff", "sync", "auth"] {
+        let listed = command_list
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some(command));
+        assert!(listed, "command list must include {command}");
     }
 }
 
