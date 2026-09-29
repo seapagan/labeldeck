@@ -48,6 +48,6 @@ fn assert_only_target_is_mutated(mock: &MockGitHub) {
 }
 
 /// Provide the token a normal (mutating) copy authenticates with.
-fn with_token(command: &mut Command) -> &mut Command {
-    command.env("LABELDECK_TOKEN", "gh_test_token")
+fn with_token(command: &mut Command) {
+    command.env("LABELDECK_TOKEN", "gh_test_token");
 }

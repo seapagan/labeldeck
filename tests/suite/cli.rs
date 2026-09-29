@@ -17,8 +17,18 @@ fn help_exits_zero_and_lists_commands() {
     let output = run(&mut isolation.command(&["--help"]));
     assert!(output.status.success());
     let text = stdout(&output);
+    // The long description also mentions `copy`, so assert against the
+    // generated command list rather than the whole help text.
+    let command_list = text
+        .split_once("Commands:")
+        .and_then(|(_, rest)| rest.split_once("Options:"))
+        .map(|(commands, _)| commands)
+        .expect("help must list commands");
     for command in ["export", "copy", "diff", "sync", "auth"] {
-        assert!(text.contains(command), "help must mention {command}");
+        let listed = command_list
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some(command));
+        assert!(listed, "command list must include {command}");
     }
 }
 
