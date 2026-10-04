@@ -136,6 +136,18 @@ impl EditForm {
 }
 
 impl super::UiState {
+    fn detail_draft(&self) -> Option<Draft> {
+        if let super::Mode::Edit(form) = &self.mode {
+            Some(form.draft())
+        } else {
+            self.document
+                .entries()
+                .iter()
+                .find(|e| Some(e.id) == self.selected)
+                .map(|entry| entry.draft.clone())
+        }
+    }
+
     pub(super) fn render_details(
         &mut self,
         frame: &mut ratatui::Frame,
@@ -143,18 +155,14 @@ impl super::UiState {
         theme: &super::theme::UiTheme,
     ) {
         use super::{Mode, theme::Role};
-        use ratatui::{layout::Rect, text::Line, widgets::Paragraph};
-        let (draft, form) = if let Mode::Edit(form) = &self.mode {
-            (form.draft(), Some(form))
-        } else if let Some(entry) = self
-            .document
-            .entries()
-            .iter()
-            .find(|e| Some(e.id) == self.selected)
-        {
-            (entry.draft.clone(), None)
-        } else {
+        use ratatui::{layout::Rect, widgets::Paragraph};
+        let Some(draft) = self.detail_draft() else {
             return;
+        };
+        let form = if let Mode::Edit(form) = &self.mode {
+            Some(form)
+        } else {
+            None
         };
         if form.is_none() {
             frame.render_widget(
@@ -171,25 +179,12 @@ impl super::UiState {
         .into_iter()
         .enumerate()
         {
-            let y = area.y + 1 + index as u16;
-            let x = area.x + 2;
-            let value_width = if field == Field::Color {
-                LABEL_COLOR_LEN
-            } else if form.is_some() {
-                Line::raw(super::render::clean(value))
-                    .width()
-                    .saturating_add(1)
-            } else {
-                usize::from(area.right().saturating_sub(x + VALUE_OFFSET))
-            };
-            let width = (usize::from(VALUE_OFFSET) + value_width)
-                .min(usize::from(area.right().saturating_sub(x)))
-                as u16;
-            self.fields[index] = Rect::new(x, y, width, 1);
+            self.fields[index] =
+                field_rect(area, field, value, form.is_some());
             if form.is_some() {
                 frame.render_widget(
                     Paragraph::new("│").style(theme.style(Role::EditAccent)),
-                    Rect::new(area.x, y, 1, 1),
+                    Rect::new(area.x, self.fields[index].y, 1, 1),
                 );
             }
             self.render_field(
@@ -211,18 +206,9 @@ impl super::UiState {
         value: &str,
         form: Option<&EditForm>,
     ) {
-        use super::{render::clean, theme::Role};
+        use super::theme::Role;
         use ratatui::{layout::Rect, widgets::Paragraph};
-        let focused = form.is_some_and(|f| f.field == field);
         let y = area.y;
-        let index = field as usize;
-        let role = if focused {
-            Role::FocusedField
-        } else if form.is_some() {
-            Role::Field
-        } else {
-            Role::DetailValue
-        };
         frame.render_widget(
             Paragraph::new(field.title())
                 .style(theme.style(Role::DetailLabel)),
@@ -235,7 +221,37 @@ impl super::UiState {
                 Rect::new(x - SWATCH_WIDTH, y, SWATCH_WIDTH, 1),
             );
         }
-        let width = area.right().saturating_sub(x);
+        self.render_value(
+            frame,
+            Rect::new(x, y, area.right().saturating_sub(x), 1),
+            theme,
+            field,
+            value,
+            form,
+        );
+    }
+
+    fn render_value(
+        &self,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &super::theme::UiTheme,
+        field: Field,
+        value: &str,
+        form: Option<&EditForm>,
+    ) {
+        use super::{render::clean, theme::Role};
+        use ratatui::widgets::Paragraph;
+        let focused = form.is_some_and(|f| f.field == field);
+        let index = field as usize;
+        let role = if focused {
+            Role::FocusedField
+        } else if form.is_some() {
+            Role::Field
+        } else {
+            Role::DetailValue
+        };
+        let width = area.width;
         let scroll = form.map_or(0, |f| {
             if field == Field::Color {
                 // All six digits fit, and the logical cursor stays inside them.
@@ -248,14 +264,38 @@ impl super::UiState {
             Paragraph::new(clean(value))
                 .style(theme.style(role))
                 .scroll((0, scroll as u16)),
-            Rect::new(x, y, width, 1),
+            area,
         );
         if focused && self.modal.is_none() {
             let cursor = form.expect("focused form").inputs[index]
                 .visual_cursor()
                 .saturating_sub(scroll)
                 .min(width.saturating_sub(1) as usize);
-            frame.set_cursor_position((x + cursor as u16, y));
+            frame.set_cursor_position((area.x + cursor as u16, area.y));
         }
     }
+}
+
+fn field_rect(
+    area: ratatui::layout::Rect,
+    field: Field,
+    value: &str,
+    editing: bool,
+) -> ratatui::layout::Rect {
+    use ratatui::{layout::Rect, text::Line};
+    let y = area.y + 1 + field as u16;
+    let x = area.x + 2;
+    let value_width = if field == Field::Color {
+        LABEL_COLOR_LEN
+    } else if editing {
+        Line::raw(super::render::clean(value))
+            .width()
+            .saturating_add(1)
+    } else {
+        usize::from(area.right().saturating_sub(x + VALUE_OFFSET))
+    };
+    let width = (usize::from(VALUE_OFFSET) + value_width)
+        .min(usize::from(area.right().saturating_sub(x)))
+        as u16;
+    Rect::new(x, y, width, 1)
 }

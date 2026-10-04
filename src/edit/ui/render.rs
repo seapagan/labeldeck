@@ -64,6 +64,14 @@ impl UiState {
             Rect::new(area.x, area.y, area.width, 1),
             &theme,
         );
+        self.render_body(frame, area, &theme);
+        self.render_controls(frame, area, &theme);
+        if self.modal.is_some() {
+            self.render_modal(frame);
+        }
+    }
+
+    fn render_body(&mut self, frame: &mut Frame, area: Rect, theme: &UiTheme) {
         let visible = visible_ids(&self.document, &self.filter);
         let height = (visible.len().max(1).saturating_add(2)).min(usize::from(
             area.height
@@ -73,10 +81,10 @@ impl UiState {
         )) as u16;
         let table_area =
             Rect::new(area.x, area.y + TITLE_HEIGHT, area.width, height);
-        self.render_table(frame, table_area, &theme);
+        self.render_table(frame, table_area, theme);
         let details =
             Rect::new(area.x, table_area.bottom(), area.width, DETAIL_HEIGHT);
-        self.render_details(frame, details, &theme);
+        self.render_details(frame, details, theme);
         frame.render_widget(
             Paragraph::new(clean(&self.error)).style(theme.style(Role::Error)),
             Rect::new(
@@ -86,10 +94,18 @@ impl UiState {
                 1,
             ),
         );
+    }
+
+    fn render_controls(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &UiTheme,
+    ) {
         self.render_filter(
             frame,
             Rect::new(area.x, area.bottom() - 3, area.width, 1),
-            &theme,
+            theme,
         );
         self.render_help(
             frame,
@@ -98,11 +114,8 @@ impl UiState {
         self.render_footer(
             frame,
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
-            &theme,
+            theme,
         );
-        if self.modal.is_some() {
-            self.render_modal(frame);
-        }
     }
 
     fn render_title(&self, frame: &mut Frame, area: Rect, theme: &UiTheme) {
@@ -130,37 +143,9 @@ impl UiState {
         theme: &UiTheme,
     ) {
         let visible = visible_ids(&self.document, &self.filter);
-        let entries: Vec<_> = visible
-            .iter()
-            .filter_map(|id| {
-                self.document.entries().iter().find(|e| e.id == *id)
-            })
-            .collect();
-        let name_width = name_width(&entries, area.width);
-        let rows: Vec<_> = entries
-            .iter()
-            .map(|entry| self.table_row(&entry.draft, theme))
-            .collect();
+        let table = self.table_widget(&visible, area.width, theme);
         self.table
             .select(visible.iter().position(|id| Some(*id) == self.selected));
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(name_width),
-                Constraint::Length(10),
-                Constraint::Fill(1),
-            ],
-        )
-        .column_spacing(2)
-        .highlight_spacing(HighlightSpacing::Always)
-        .header(
-            Row::new(["LABEL", "COLOR", "DESCRIPTION"])
-                .style(theme.style(Role::Header))
-                .bottom_margin(1),
-        )
-        .style(theme.style(Role::DetailValue))
-        .row_highlight_style(theme.style(Role::Selected))
-        .highlight_symbol("> ");
         frame.render_stateful_widget(table, area, &mut self.table);
         frame.render_widget(
             Paragraph::new("─".repeat(usize::from(area.width)))
@@ -184,6 +169,43 @@ impl UiState {
                 self.rows,
             );
         }
+    }
+
+    fn table_widget(
+        &self,
+        visible: &[crate::edit::model::EntryId],
+        width: u16,
+        theme: &UiTheme,
+    ) -> Table<'static> {
+        let entries: Vec<_> = visible
+            .iter()
+            .filter_map(|id| {
+                self.document.entries().iter().find(|e| e.id == *id)
+            })
+            .collect();
+        let name_width = name_width(&entries, width);
+        let rows: Vec<_> = entries
+            .iter()
+            .map(|entry| self.table_row(&entry.draft, theme))
+            .collect();
+        Table::new(
+            rows,
+            [
+                Constraint::Length(name_width),
+                Constraint::Length(10),
+                Constraint::Fill(1),
+            ],
+        )
+        .column_spacing(2)
+        .highlight_spacing(HighlightSpacing::Always)
+        .header(
+            Row::new(["LABEL", "COLOR", "DESCRIPTION"])
+                .style(theme.style(Role::Header))
+                .bottom_margin(1),
+        )
+        .style(theme.style(Role::DetailValue))
+        .row_highlight_style(theme.style(Role::Selected))
+        .highlight_symbol("> ")
     }
 
     fn table_row(
