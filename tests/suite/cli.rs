@@ -1216,7 +1216,7 @@ fn dry_run_suggestion_pins_the_resolved_global_path() {
     // platform's temporary-directory path; both must carry the exact
     // path so the rerun cannot re-resolve precedence.
     let command_form = format!("--file {} --no-prune", global.display());
-    let structured_form = format!("file:       {:?}", global);
+    let structured_form = format!("file:       {global:?}");
     assert!(
         text.contains(&command_form) || text.contains(&structured_form),
         "guidance must pin the exact global deck path: {text}"
