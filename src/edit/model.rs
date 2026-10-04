@@ -108,6 +108,14 @@ impl Document {
         id
     }
 
+    /// Commit a pending new label with one creation snapshot, after validation.
+    pub fn create(&mut self, draft: Draft) -> Result<EntryId, String> {
+        let draft = Draft::from(&draft.label()?);
+        let id = self.add();
+        self.entries.last_mut().expect("new entry").draft = draft;
+        Ok(id)
+    }
+
     pub fn delete(&mut self, id: EntryId) -> bool {
         let Some(index) =
             self.entries.iter().position(|e| e.id == id && !e.deleted)

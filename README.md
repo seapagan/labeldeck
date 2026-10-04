@@ -110,27 +110,36 @@ deck. `--file -` is invalid. These selectors and `OWNER/REPO` are mutually exclu
 opening the editor. It uses the same token precedence and first-use login as
 sync; `--no-proxy` applies. Input and output must be interactive terminals.
 
-Edits remain in memory. **Cancel** discards them; **Apply** validates the final
-set and opens a confirmation summary. Confirming restores the terminal before
+Edits remain in memory. **Cancel** leaves the source untouched. **Apply** is
+disabled until the final label set differs from the baseline. Ctrl-S or Apply
+validates the final set and opens a centred confirmation modal over the editor.
+No source mutation occurs before confirmation. Confirming restores the terminal before
 writing the deck or issuing paced GitHub mutations, with progress on stderr.
 Undo/Redo operate on committed edits, additions, and deletions, not keystrokes
-or filter changes. A new edit after Undo clears Redo.
+or filter changes. Saving a label's three-field form is one undoable edit.
+A new committed edit after Undo clears Redo.
 
 | Keys | Action |
 | --- | --- |
 | Up/Down, PageUp/PageDown | Select a label |
-| Enter or `e` | Edit the selected label |
-| `n`, Delete | Add or mark a label for deletion |
+| Enter or `e` | Open the selected label's Name, Color, and Description form |
+| `n`, Delete | Open a new-label form or mark the selected label for deletion |
 | `/` | Filter by case-insensitive name/description substring |
-| Tab/Shift-Tab | Move between fields, or focus buttons at list level |
-| Enter in a field | Validate and commit the buffered field |
-| Esc in a field/filter | Discard the buffer or restore the previous filter |
-| Ctrl-Z / Ctrl-Y | Undo / Redo; discard uncommitted field input first |
-| Ctrl-S | Open Apply confirmation |
+| Up/Down or Tab/Shift-Tab in the form | Focus another field without saving |
+| Left/Right, Home/End, Backspace/Delete in the form | Move the cursor or edit text |
+| Enter in the form | Validate and save all three fields together |
+| Esc in the form | Cancel the entire edit, including a pending new label |
+| Enter / Esc in the filter | Accept the filter / restore the previous filter |
+| Ctrl-Z / Ctrl-Y | Undo / Redo; discard uncommitted form input first |
+| Tab/Shift-Tab at list level | Focus the compact footer buttons |
+| Ctrl-S / Apply | Open confirmation when semantic changes exist |
 | `q` or Esc at list level, Ctrl-C anywhere | Cancel |
 
-Buttons and list rows support mouse clicks; the mouse wheel navigates labels.
-Confirmation defaults to Back. Tab/arrow keys select Apply, then Enter confirms.
+Buttons, list rows, and form fields support mouse clicks; the mouse wheel
+navigates labels. Colour previews update as soon as a draft is valid;
+incomplete colours are allowed while typing and validated when saving the form.
+Confirmation defaults to Back. Left/Right or Tab/Shift-Tab selects Apply/Back,
+Enter activates the choice, and Esc returns to the editor.
 Colour swatches respect terminal capabilities through colored_text and
 `NO_COLOR`; hex values remain visible and stored colours are unchanged.
 

@@ -1,5 +1,8 @@
-use super::{Field, Mode, UiAction, UiState};
-use crate::edit::{model::visible_ids, plan};
+use super::{ConfirmApply, Mode, UiAction, UiState, form::EditForm};
+use crate::edit::{
+    model::{Draft, visible_ids},
+    plan,
+};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
     MouseEvent, MouseEventKind,
@@ -21,6 +24,9 @@ impl UiState {
             if self.small {
                 return matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
                     .then_some(UiAction::Cancel);
+            }
+            if self.modal.is_some() {
+                return self.modal_key(key);
             }
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match key.code {
@@ -45,6 +51,12 @@ impl UiState {
             return self.key(key);
         }
         match event {
+            Event::Resize(width, height) => {
+                self.small = width < 48 || height < 16;
+                self.buttons.clear();
+                self.fields = [ratatui::layout::Rect::default(); 3];
+                self.rows = ratatui::layout::Rect::default();
+            }
             Event::Paste(text) => self.paste(&text),
             Event::Mouse(mouse) if !self.small => return self.mouse(mouse),
             _ => {}
@@ -55,28 +67,7 @@ impl UiState {
     fn key(&mut self, key: KeyEvent) -> Option<UiAction> {
         match &mut self.mode {
             Mode::List => self.list_key(key.code),
-            Mode::Confirm { apply, .. } => match key.code {
-                KeyCode::Esc => {
-                    self.mode = Mode::List;
-                    None
-                }
-                KeyCode::Tab
-                | KeyCode::BackTab
-                | KeyCode::Left
-                | KeyCode::Right => {
-                    *apply = !*apply;
-                    None
-                }
-                KeyCode::Enter if *apply => {
-                    Some(UiAction::Apply(self.document.clone()))
-                }
-                KeyCode::Enter => {
-                    self.mode = Mode::List;
-                    None
-                }
-                _ => None,
-            },
-            Mode::Edit { .. } => {
+            Mode::Edit(_) => {
                 self.edit_key(key);
                 None
             }
@@ -122,13 +113,18 @@ impl UiState {
             KeyCode::Enter if self.button.is_some() => {
                 return self.activate(self.button.unwrap());
             }
-            KeyCode::Enter | KeyCode::Char('e') => {
-                self.start_edit(Field::Name)
-            }
+            KeyCode::Enter | KeyCode::Char('e') => self.start_edit(),
             KeyCode::Char('n') => {
-                self.filter.clear();
-                self.selected = Some(self.document.add());
-                self.start_edit(Field::Name);
+                self.mode = Mode::Edit(EditForm::new(
+                    None,
+                    Draft {
+                        name: String::new(),
+                        color: "ededed".into(),
+                        description: String::new(),
+                    },
+                ));
+                self.button = None;
+                self.error.clear();
             }
             KeyCode::Delete => {
                 if let Some(id) = self.selected {
@@ -164,7 +160,7 @@ impl UiState {
             .copied();
     }
 
-    fn start_edit(&mut self, field: Field) {
+    fn start_edit(&mut self) {
         let Some(entry) = self
             .document
             .entries()
@@ -173,69 +169,65 @@ impl UiState {
         else {
             return;
         };
-        let value = match field {
-            Field::Name => &entry.draft.name,
-            Field::Color => &entry.draft.color,
-            Field::Description => &entry.draft.description,
-        };
-        self.mode = Mode::Edit {
-            id: entry.id,
-            field,
-            input: Input::new(value.clone()),
-        };
+        self.mode =
+            Mode::Edit(EditForm::new(Some(entry.id), entry.draft.clone()));
         self.button = None;
         self.error.clear();
     }
 
     fn edit_key(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Esc {
-            self.mode = Mode::List;
-            self.error.clear();
-            self.repair_selection();
-            return;
-        }
-        if matches!(key.code, KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab)
-        {
-            if let Err(error) = self.commit_input(key.code) {
-                self.error = error;
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::List;
+                self.error.clear();
+                self.repair_selection();
             }
-        } else if let Mode::Edit { input, .. } = &mut self.mode {
-            input.handle_event(&Event::Key(key));
+            KeyCode::Enter => {
+                if let Err(error) = self.commit_form() {
+                    self.error = error;
+                }
+            }
+            _ => {
+                if let Mode::Edit(form) = &mut self.mode {
+                    match key.code {
+                        KeyCode::Up | KeyCode::BackTab => {
+                            form.field = form.field.next(true)
+                        }
+                        KeyCode::Down | KeyCode::Tab => {
+                            form.field = form.field.next(false)
+                        }
+                        _ => {
+                            form.input().handle_event(&Event::Key(key));
+                        }
+                    }
+                }
+            }
         }
     }
 
-    fn commit_input(&mut self, code: KeyCode) -> Result<(), String> {
-        let Mode::Edit { id, field, input } = &self.mode else {
+    fn commit_form(&mut self) -> Result<(), String> {
+        let Mode::Edit(form) = &mut self.mode else {
             return Ok(());
         };
-        let mut draft = self
-            .document
-            .entries()
-            .iter()
-            .find(|e| e.id == *id)
-            .ok_or("the edited label no longer exists")?
-            .draft
-            .clone();
-        match field {
-            Field::Name => draft.name = input.value().into(),
-            Field::Color => draft.color = input.value().into(),
-            Field::Description => draft.description = input.value().into(),
+        let draft = form.validate()?;
+        if let Some(id) = form.id {
+            self.document.commit(id, draft)?;
+        } else {
+            self.selected = Some(self.document.create(draft)?);
         }
-        let field = *field;
-        self.document.commit(*id, draft)?;
         self.mode = Mode::List;
         self.error.clear();
-        if code != KeyCode::Enter {
-            self.start_edit(field.next(code == KeyCode::BackTab));
-        } else {
-            self.repair_selection();
-        }
+        self.repair_selection();
         Ok(())
     }
 
     fn paste(&mut self, text: &str) {
+        if self.modal.is_some() {
+            return;
+        }
         let input = match &mut self.mode {
-            Mode::Edit { input, .. } | Mode::Filter { input, .. } => input,
+            Mode::Edit(form) => form.input(),
+            Mode::Filter { input, .. } => input,
             _ => return,
         };
         for ch in text.chars().filter(|ch| !ch.is_control()) {
@@ -250,12 +242,17 @@ impl UiState {
     }
 
     fn confirm(&mut self) {
+        if !self.dirty() {
+            self.error = "No changes to apply.".into();
+            return;
+        }
         match plan::plan(&self.document) {
             Ok(plan) => {
-                self.mode = Mode::Confirm {
+                self.modal = Some(ConfirmApply {
                     summary: plan.summary,
                     apply: false,
-                };
+                });
+                self.buttons.clear();
                 self.error.clear();
             }
             Err(error) => self.error = error,
@@ -281,14 +278,27 @@ impl UiState {
 
     fn mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
         let position = Position::new(mouse.column, mouse.row);
-        if let Mode::Confirm { .. } = self.mode {
+        if self.modal.is_some() {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                 if self.buttons.first().is_some_and(|r| r.contains(position)) {
                     return Some(UiAction::Apply(self.document.clone()));
                 }
                 if self.buttons.get(1).is_some_and(|r| r.contains(position)) {
-                    self.mode = Mode::List;
+                    self.dismiss_modal();
                 }
+            }
+            return None;
+        }
+        if let Mode::Edit(form) = &mut self.mode {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some(i) =
+                    self.fields.iter().position(|r| r.contains(position))
+            {
+                form.field = [
+                    super::Field::Name,
+                    super::Field::Color,
+                    super::Field::Description,
+                ][i];
             }
             return None;
         }

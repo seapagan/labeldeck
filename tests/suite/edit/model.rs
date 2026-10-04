@@ -64,6 +64,22 @@ fn unchanged_commit_does_not_record_history() {
 }
 
 #[test]
+fn validated_creation_rejects_invalid_drafts_without_history() {
+    let mut doc = document();
+    let original = doc.entries()[0].draft.clone();
+    let mut draft = original.clone();
+    draft.color = "bad".into();
+    assert!(doc.create(draft).is_err());
+    assert_eq!(doc.entries().len(), 1);
+    assert!(!doc.can_undo());
+    let id = doc.create(original).unwrap();
+    assert_eq!(id, 1);
+    assert!(doc.undo());
+    assert_eq!(doc.labels().unwrap(), vec![label("bug")]);
+    assert!(!doc.can_undo());
+}
+
+#[test]
 fn delete_and_history_restore_document() {
     let mut doc = document();
     let id = doc.entries()[0].id;

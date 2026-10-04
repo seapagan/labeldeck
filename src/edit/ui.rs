@@ -1,8 +1,12 @@
 //! Small terminal editor with independently testable rendering and events.
 
+mod controls;
 mod events;
+mod form;
+mod modal;
 mod render;
 mod terminal;
+mod theme;
 
 use super::{
     model::{Document, EntryId, visible_ids},
@@ -36,7 +40,7 @@ pub enum UiAction {
     Apply(Document),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Field {
     Name,
     Color,
@@ -62,33 +66,28 @@ impl Field {
 
 enum Mode {
     List,
-    Edit {
-        id: EntryId,
-        field: Field,
-        input: Input,
-    },
-    Filter {
-        before: String,
-        input: Input,
-    },
-    Confirm {
-        summary: ChangeSummary,
-        apply: bool,
-    },
+    Edit(form::EditForm),
+    Filter { before: String, input: Input },
+}
+
+struct ConfirmApply {
+    summary: ChangeSummary,
+    apply: bool,
 }
 
 pub struct UiState {
     document: Document,
     title: String,
-    live: bool,
     level: ColorLevel,
     selected: Option<EntryId>,
     filter: String,
     mode: Mode,
+    modal: Option<ConfirmApply>,
     error: String,
     button: Option<usize>,
     buttons: Vec<Rect>,
     rows: Rect,
+    fields: [Rect; 3],
     table: TableState,
     small: bool,
 }
@@ -97,22 +96,23 @@ impl UiState {
     pub fn new(
         document: Document,
         title: String,
-        live: bool,
+        _live: bool,
         level: ColorLevel,
     ) -> Self {
         let selected = visible_ids(&document, "").first().copied();
         Self {
             document,
             title,
-            live,
             level,
             selected,
             filter: String::new(),
             mode: Mode::List,
+            modal: None,
             error: String::new(),
             button: None,
             buttons: Vec::new(),
             rows: Rect::default(),
+            fields: [Rect::default(); 3],
             table: TableState::default(),
             small: false,
         }
@@ -124,8 +124,10 @@ impl UiState {
         self.selected
     }
     fn repair_selection(&mut self) {
-        if let Mode::Edit { id, .. } = &self.mode {
-            self.selected = Some(*id);
+        if let Mode::Edit(form) = &self.mode {
+            if let Some(id) = form.id {
+                self.selected = Some(id);
+            }
             return;
         }
         let visible = visible_ids(&self.document, &self.filter);

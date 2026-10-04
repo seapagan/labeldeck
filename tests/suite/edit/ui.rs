@@ -10,7 +10,7 @@ use labeldeck::edit::{
 };
 use ratatui::{Terminal, backend::TestBackend};
 
-fn state(live: bool) -> UiState {
+pub(super) fn state(live: bool) -> UiState {
     UiState::new(
         Document::from_labels(vec![label("bug"), label("docs")]),
         "labels.json".into(),
@@ -18,16 +18,16 @@ fn state(live: bool) -> UiState {
         ColorLevel::NoColor,
     )
 }
-fn key(state: &mut UiState, code: KeyCode) -> Option<UiAction> {
+pub(super) fn key(state: &mut UiState, code: KeyCode) -> Option<UiAction> {
     state.handle(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
 }
-fn ctrl(state: &mut UiState, c: char) -> Option<UiAction> {
+pub(super) fn ctrl(state: &mut UiState, c: char) -> Option<UiAction> {
     state.handle(Event::Key(KeyEvent::new(
         KeyCode::Char(c),
         KeyModifiers::CONTROL,
     )))
 }
-fn screen(state: &mut UiState, w: u16, h: u16) -> String {
+pub(super) fn screen(state: &mut UiState, w: u16, h: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     terminal.draw(|f| state.render(f)).unwrap();
     terminal
@@ -91,7 +91,7 @@ fn navigation_filtering_and_selection_repair_are_presentation_only() {
 fn staged_edits_commit_once_and_history_discards_stale_input() {
     let mut ui = state(false);
     key(&mut ui, KeyCode::Enter);
-    assert!(screen(&mut ui, 80, 24).contains("Editing Name"));
+    assert!(screen(&mut ui, 80, 24).contains("> Name"));
     ui.handle(Event::Paste(" new".into()));
     assert!(!ui.document().can_undo());
     key(&mut ui, KeyCode::Enter);
@@ -115,15 +115,15 @@ fn new_row_is_visible_under_filter_and_invalid_name_stays_in_input() {
     ui.handle(Event::Paste("docs".into()));
     key(&mut ui, KeyCode::Enter);
     key(&mut ui, KeyCode::Char('n'));
-    let id = ui.selected().unwrap();
-    assert!(id > 1);
+    assert_eq!(ui.document().entries().len(), 2);
+    assert!(!ui.document().can_undo());
     key(&mut ui, KeyCode::Enter);
     assert!(screen(&mut ui, 80, 24).contains("must not be empty"));
-    ui.handle(Event::Paste("new\n\x1b\tlabel".into()));
+    ui.handle(Event::Paste("docsnew\n\x1b\tlabel".into()));
     key(&mut ui, KeyCode::Enter);
     assert_eq!(
         ui.document().labels().unwrap().last().unwrap().name,
-        "newlabel"
+        "docsnewlabel"
     );
     key(&mut ui, KeyCode::Delete);
     assert_eq!(ui.document().labels().unwrap().len(), 2);
@@ -169,13 +169,13 @@ fn filtered_rename_keeps_field_traversal_on_the_edited_label() {
         }
         ui.handle(Event::Paste("new".into()));
         key(&mut ui, KeyCode::Tab);
-        assert!(screen(&mut ui, 80, 24).contains("Editing Color"));
+        assert!(screen(&mut ui, 80, 24).contains("> Color"));
         assert_eq!(ui.selected(), Some(0));
         key(&mut ui, KeyCode::Tab);
-        assert!(screen(&mut ui, 80, 24).contains("Editing Description"));
+        assert!(screen(&mut ui, 80, 24).contains("> Description"));
         ui.handle(Event::Paste("correct row".into()));
         key(&mut ui, KeyCode::BackTab);
-        assert!(screen(&mut ui, 80, 24).contains("Editing Color"));
+        assert!(screen(&mut ui, 80, 24).contains("> Color"));
         key(&mut ui, KeyCode::Tab);
         screen(&mut ui, 80, 24);
         key(&mut ui, KeyCode::Enter);
@@ -218,7 +218,7 @@ fn mouse_buttons_rows_and_wheel_use_rendered_hit_areas() {
             modifiers: KeyModifiers::NONE,
         })
     };
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 3));
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 4));
     assert_eq!(ui.selected(), Some(1));
     ui.handle(mouse(MouseEventKind::ScrollUp, 2, 3));
     assert_eq!(ui.selected(), Some(0));
@@ -271,30 +271,29 @@ fn keyboard_buttons_support_history_apply_and_cancel_without_mouse() {
 
 #[test]
 fn clickable_history_and_confirmation_buttons_follow_current_layout() {
-    let mouse = |kind, x, y| {
-        Event::Mouse(MouseEvent {
-            kind,
-            column: x,
-            row: y,
-            modifiers: KeyModifiers::NONE,
-        })
-    };
+    use super::rendering::{click, draw, locate};
     let mut ui = state(false);
     key(&mut ui, KeyCode::Delete);
-    screen(&mut ui, 80, 24);
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 23));
+    let buffer = draw(&mut ui, 80, 24);
+    let undo = locate(&buffer, "[ Undo ]");
+    click(&mut ui, undo.0, undo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 2);
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 22, 23));
+    let buffer = draw(&mut ui, 80, 24);
+    let redo = locate(&buffer, "[ Redo ]");
+    click(&mut ui, redo.0, redo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 1);
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 42, 23));
-    screen(&mut ui, 80, 24);
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 42, 23));
+    let buffer = draw(&mut ui, 80, 24);
+    let apply = locate(&buffer, "[ Apply ]");
+    click(&mut ui, apply.0, apply.1);
+    let buffer = draw(&mut ui, 80, 24);
+    let back = locate(&buffer, "[ Back ]");
+    click(&mut ui, back.0, back.1);
     assert!(!screen(&mut ui, 80, 24).contains("Confirm Apply"));
     ctrl(&mut ui, 's');
-    screen(&mut ui, 80, 24);
-    assert!(ui.handle(mouse(MouseEventKind::Moved, 2, 23)).is_none());
+    let buffer = draw(&mut ui, 80, 24);
+    let apply = locate(&buffer, "[ Apply ]");
     assert!(matches!(
-        ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 23)),
+        click(&mut ui, apply.0, apply.1),
         Some(UiAction::Apply(_))
     ));
 }
@@ -302,10 +301,11 @@ fn clickable_history_and_confirmation_buttons_follow_current_layout() {
 #[test]
 fn invalid_apply_keeps_editor_open_and_input_mouse_never_mutates() {
     let mut ui = state(false);
-    key(&mut ui, KeyCode::Char('n'));
-    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Enter);
+    super::form::replace(&mut ui, "docs");
+    key(&mut ui, KeyCode::Enter);
     ctrl(&mut ui, 's');
-    assert!(screen(&mut ui, 80, 24).contains("must not be empty"));
+    assert!(screen(&mut ui, 80, 24).contains("duplicate label name"));
     key(&mut ui, KeyCode::Enter);
     screen(&mut ui, 80, 24);
     ui.handle(Event::Mouse(MouseEvent {
@@ -314,7 +314,7 @@ fn invalid_apply_keeps_editor_open_and_input_mouse_never_mutates() {
         row: 23,
         modifiers: KeyModifiers::NONE,
     }));
-    assert!(screen(&mut ui, 80, 24).contains("Editing Name"));
+    assert!(screen(&mut ui, 80, 24).contains("> Name"));
 }
 
 #[test]
@@ -386,15 +386,15 @@ fn swatches_use_colour_only_when_capability_allows() {
             .buffer()
             .content()
             .iter()
-            .filter(|c| c.symbol() == "■")
+            .filter(|c| c.symbol() == "█")
             .collect();
-        assert_eq!(cells.len(), 1);
+        assert_eq!(cells.len(), 4);
         assert_eq!(
             cells[0].fg == ratatui::style::Color::Reset,
             level == ColorLevel::NoColor
         );
         ctrl(&mut ui, 's');
-        assert!(screen(&mut ui, 80, 24).contains("remain in memory"));
+        assert!(screen(&mut ui, 80, 24).contains("No changes to apply."));
         key(&mut ui, KeyCode::Char('x'));
         key(&mut ui, KeyCode::Right);
         key(&mut ui, KeyCode::Left);
@@ -410,6 +410,7 @@ fn event_loop_drives_cancel_apply_and_input_failure_with_test_backend() {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let keys = if apply {
             vec![
+                (KeyCode::Delete, KeyModifiers::NONE),
                 (KeyCode::Char('s'), KeyModifiers::CONTROL),
                 (KeyCode::Tab, KeyModifiers::NONE),
                 (KeyCode::Enter, KeyModifiers::NONE),
@@ -453,7 +454,7 @@ fn scroll_offset_and_mouse_selection_match_visible_rows_after_resize() {
     ui.handle(Event::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 2,
-        row: 2,
+        row: 3,
         modifiers: KeyModifiers::NONE,
     }));
     assert!(ui.selected().unwrap() > 0);
