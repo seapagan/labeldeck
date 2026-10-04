@@ -1,4 +1,5 @@
 pub mod model;
+pub mod plan;
 
 use labeldeck::labels::{Label, LabelColor};
 
