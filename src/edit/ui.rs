@@ -124,6 +124,10 @@ impl UiState {
         self.selected
     }
     fn repair_selection(&mut self) {
+        if let Mode::Edit { id, .. } = &self.mode {
+            self.selected = Some(*id);
+            return;
+        }
         let visible = visible_ids(&self.document, &self.filter);
         if self.selected.is_none_or(|id| !visible.contains(&id)) {
             self.selected = visible.first().copied();

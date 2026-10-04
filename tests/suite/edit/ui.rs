@@ -152,6 +152,43 @@ fn tab_cursor_and_field_switching_commit_colour_and_description() {
 }
 
 #[test]
+fn filtered_rename_keeps_field_traversal_on_the_edited_label() {
+    for neighbor in ["bug2", "docs"] {
+        let mut ui = UiState::new(
+            Document::from_labels(vec![label("bug"), label(neighbor)]),
+            "labels.json".into(),
+            false,
+            ColorLevel::NoColor,
+        );
+        key(&mut ui, KeyCode::Char('/'));
+        ui.handle(Event::Paste("bug".into()));
+        key(&mut ui, KeyCode::Enter);
+        key(&mut ui, KeyCode::Enter);
+        for _ in 0..3 {
+            key(&mut ui, KeyCode::Backspace);
+        }
+        ui.handle(Event::Paste("new".into()));
+        key(&mut ui, KeyCode::Tab);
+        assert!(screen(&mut ui, 80, 24).contains("Editing Color"));
+        assert_eq!(ui.selected(), Some(0));
+        key(&mut ui, KeyCode::Tab);
+        assert!(screen(&mut ui, 80, 24).contains("Editing Description"));
+        ui.handle(Event::Paste("correct row".into()));
+        key(&mut ui, KeyCode::BackTab);
+        assert!(screen(&mut ui, 80, 24).contains("Editing Color"));
+        key(&mut ui, KeyCode::Tab);
+        screen(&mut ui, 80, 24);
+        key(&mut ui, KeyCode::Enter);
+        screen(&mut ui, 80, 24);
+        let labels = ui.document().labels().unwrap();
+        assert_eq!(labels[0].name, "new");
+        assert_eq!(labels[0].description, "correct row");
+        assert_eq!(labels[1], label(neighbor));
+        assert_eq!(ui.selected(), (neighbor == "bug2").then_some(1));
+    }
+}
+
+#[test]
 fn apply_requires_confirmation_and_warns_for_live_deletes() {
     let mut ui = state(true);
     key(&mut ui, KeyCode::Delete);
