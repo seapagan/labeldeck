@@ -120,13 +120,29 @@ fn invalid_form_preserves_drafts_and_focuses_offending_field() {
         let rendered = screen(&mut ui, 160, 24);
         assert!(rendered.contains(error), "{rendered}");
         assert_focus(&mut ui, ["Name", "Color", "Description"][field]);
-        assert!(rendered.contains(&value));
+        let buffer = super::rendering::draw(&mut ui, 160, 24);
+        let (x, y) = super::rendering::locate(
+            &buffer,
+            ["Name", "Color", "Description"][field],
+        );
+        let field_value = super::rendering::row(&buffer, y);
+        let field_value = field_value[usize::from(x + 17)..].trim();
+        if value.is_empty() {
+            assert_eq!(field_value, "", "empty draft was replaced");
+        } else {
+            assert!(field_value.ends_with(&value), "{field_value}");
+        }
         assert_eq!(
             ui.document().labels().unwrap(),
             vec![label("bug"), label("docs")]
         );
         assert!(!ui.document().can_undo());
         assert!(rendered.contains("Enter save"));
+        if value.is_empty() {
+            ui.handle(Event::Paste("repaired".into()));
+            key(&mut ui, KeyCode::Enter);
+            assert_eq!(ui.document().labels().unwrap()[0].name, "repaired");
+        }
     }
 }
 

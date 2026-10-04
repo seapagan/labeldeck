@@ -13,6 +13,9 @@ use tui_input::{
     backend::crossterm::{EventHandler, to_input_request},
 };
 
+#[cfg(test)]
+mod tests;
+
 impl UiState {
     pub fn handle(&mut self, event: Event) -> Option<UiAction> {
         match event {
@@ -38,19 +41,28 @@ impl UiState {
         if key.kind == KeyEventKind::Release {
             return None;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL)
+        if key.modifiers == KeyModifiers::CONTROL
             && key.code == KeyCode::Char('c')
         {
             return Some(UiAction::Cancel);
         }
+        // List shortcuts require plain keys. Keep modifiers for text inputs.
+        let shortcut_modifier = key.modifiers.intersects(
+            KeyModifiers::CONTROL
+                | KeyModifiers::ALT
+                | KeyModifiers::SUPER
+                | KeyModifiers::HYPER
+                | KeyModifiers::META,
+        );
         if self.small {
-            return matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-                .then_some(UiAction::Cancel);
+            return (!shortcut_modifier
+                && matches!(key.code, KeyCode::Esc | KeyCode::Char('q')))
+            .then_some(UiAction::Cancel);
         }
         if self.modal.is_some() {
             return self.modal_key(key);
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if key.modifiers == KeyModifiers::CONTROL {
             match key.code {
                 KeyCode::Char('z' | 'y') => {
                     self.mode = Mode::List;
@@ -63,12 +75,17 @@ impl UiState {
                     self.repair_selection();
                     return None;
                 }
-                KeyCode::Char('s') if matches!(self.mode, Mode::List) => {
-                    self.confirm();
+                KeyCode::Char('s') => {
+                    if matches!(self.mode, Mode::List) {
+                        self.confirm();
+                    }
                     return None;
                 }
                 _ => {}
             }
+        }
+        if shortcut_modifier && matches!(self.mode, Mode::List) {
+            return None;
         }
         self.key(key)
     }
@@ -266,7 +283,14 @@ impl UiState {
         }
     }
 
+    pub(super) fn apply_available(&self) -> bool {
+        matches!(self.mode, Mode::List) && self.modal.is_none() && self.dirty()
+    }
+
     fn confirm(&mut self) {
+        if !matches!(self.mode, Mode::List) || self.modal.is_some() {
+            return;
+        }
         if !self.dirty() {
             self.error = "No changes to apply.".into();
             return;
@@ -285,6 +309,13 @@ impl UiState {
     }
 
     fn activate(&mut self, button: usize) -> Option<UiAction> {
+        if button == 2 && !self.apply_available() {
+            // Retain the existing no-changes message in list mode only.
+            if matches!(self.mode, Mode::List) && self.modal.is_none() {
+                self.confirm();
+            }
+            return None;
+        }
         self.error.clear();
         match button {
             0 => {

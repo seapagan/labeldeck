@@ -128,7 +128,7 @@ fn all_summary_categories_and_warning_fit_minimum_terminal_without_colour() {
             label("stale"),
         ]),
         "deck".into(),
-        false,
+        true,
         ColorLevel::NoColor,
     );
     key(&mut ui, KeyCode::Enter);

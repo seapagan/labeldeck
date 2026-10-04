@@ -394,10 +394,6 @@ fn swatches_use_colour_only_when_capability_allows() {
         );
         ctrl(&mut ui, 's');
         assert!(screen(&mut ui, 80, 24).contains("No changes to apply."));
-        key(&mut ui, KeyCode::Char('x'));
-        key(&mut ui, KeyCode::Right);
-        key(&mut ui, KeyCode::Left);
-        key(&mut ui, KeyCode::Esc);
     }
 }
 
@@ -437,6 +433,7 @@ fn event_loop_drives_cancel_apply_and_input_failure_with_test_backend() {
 
 #[test]
 fn scroll_offset_and_mouse_selection_match_visible_rows_after_resize() {
+    use super::rendering::{click, draw, locate, row};
     let mut ui = UiState::new(
         Document::from_labels(
             (0..50).map(|i| label(&format!("label-{i:02}"))).collect(),
@@ -448,14 +445,36 @@ fn scroll_offset_and_mouse_selection_match_visible_rows_after_resize() {
     for _ in 0..30 {
         key(&mut ui, KeyCode::Down);
     }
-    let rendered = screen(&mut ui, 80, 24);
-    assert!(rendered.contains("label-30"));
-    ui.handle(Event::Mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: 2,
-        row: 4,
-        modifiers: KeyModifiers::NONE,
-    }));
-    assert!(ui.selected().unwrap() > 0);
-    assert!(screen(&mut ui, 48, 16).contains("label-"));
+    for (width, height) in [(80, 24), (48, 16)] {
+        ui.handle(Event::Resize(width, height));
+        let buffer = draw(&mut ui, width, height);
+        let (_, y) = locate(&buffer, "label-30");
+        assert!(y >= 4 && y < locate(&buffer, "Name").1);
+        assert!(row(&buffer, y).starts_with(">"));
+        assert_eq!(ui.selected(), Some(30));
+    }
+    let buffer = draw(&mut ui, 48, 16);
+    let first_row = row(&buffer, 4);
+    let expected = (0..50)
+        .find(|i| first_row.contains(&format!("label-{i:02}")))
+        .unwrap();
+    assert!(expected > 0);
+    click(&mut ui, 2, 4);
+    assert_eq!(ui.selected(), Some(expected));
+    let buffer = draw(&mut ui, 48, 16);
+    let (_, y) = locate(&buffer, &format!("label-{expected:02}"));
+    assert!(row(&buffer, y).starts_with(">"));
+}
+
+#[test]
+fn deletion_warning_depends_on_live_source_only() {
+    for live in [false, true] {
+        let mut ui = state(live);
+        key(&mut ui, KeyCode::Delete);
+        ctrl(&mut ui, 's');
+        let text = screen(&mut ui, 80, 24);
+        assert!(text.contains("1 deleted"));
+        assert_eq!(text.contains("Deleting labels removes"), live);
+        assert_eq!(text.contains("issues and pull requests"), live);
+    }
 }

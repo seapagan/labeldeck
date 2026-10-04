@@ -40,7 +40,7 @@ impl UiState {
         let theme = UiTheme::new(self.level, false);
         let area = frame.area();
         let width = area.width.saturating_sub(4).min(60);
-        let lines = modal.lines(width, &theme);
+        let lines = modal.lines(width, &theme, self.live);
         let body_height = lines.len() as u16;
         let height = body_height + 6;
         let rect = Rect::new(
@@ -83,7 +83,12 @@ impl UiState {
 }
 
 impl super::ConfirmApply {
-    fn lines(&self, width: u16, theme: &UiTheme) -> Vec<Line<'static>> {
+    fn lines(
+        &self,
+        width: u16,
+        theme: &UiTheme,
+        live: bool,
+    ) -> Vec<Line<'static>> {
         let counts = [
             (self.summary.renamed, "renamed"),
             (self.summary.updated, "colour/description updated"),
@@ -98,7 +103,7 @@ impl super::ConfirmApply {
                     .style(theme.style(Role::ModalBody))
             })
             .collect();
-        let warning = self.summary.deleted > 0;
+        let warning = live && self.summary.deleted > 0;
         if warning {
             lines.push(Line::default());
             let text = if width >= 50 {

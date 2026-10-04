@@ -107,8 +107,8 @@ Enter in the form to save your pending changes, or Esc to discard that form.
 Use Undo and Redo for saved edits, additions, and deletions.
 
 Press Ctrl-S or click Apply to review the confirmation, then choose Apply to
-write your changes. Apply is available after you make changes. Cancel exits
-without applying them.
+write your changes. Apply is available in the list after you make changes;
+finish or cancel the form/filter first. Cancel exits without applying them.
 
 | Keys | Action |
 |------|--------|
@@ -124,7 +124,7 @@ without applying them.
 | Enter / Esc in the filter | Accept the filter / restore the previous filter |
 | Ctrl-Z / Ctrl-Y | Undo / Redo; discard unsaved form input first |
 | Tab/Shift-Tab at list level | Cycle buttons |
-| Ctrl-S / Apply | Open the Apply confirmation |
+| Ctrl-S / Apply | Open the Apply confirmation from the list after changes |
 | `q` or Esc at list level, Ctrl-C anywhere | Cancel |
 
 You can click rows, buttons, and fields, or scroll labels with the mouse wheel.

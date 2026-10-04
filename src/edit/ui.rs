@@ -78,6 +78,7 @@ struct ConfirmApply {
 pub struct UiState {
     document: Document,
     title: String,
+    live: bool,
     level: ColorLevel,
     selected: Option<EntryId>,
     filter: String,
@@ -96,13 +97,14 @@ impl UiState {
     pub fn new(
         document: Document,
         title: String,
-        _live: bool,
+        live: bool,
         level: ColorLevel,
     ) -> Self {
         let selected = visible_ids(&document, "").first().copied();
         Self {
             document,
             title,
+            live,
             level,
             selected,
             filter: String::new(),

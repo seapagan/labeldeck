@@ -7,7 +7,55 @@ use crossterm::{
     execute,
 };
 use std::io;
+use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::sync::Arc;
+
+#[cfg(test)]
+mod tests;
+
+type Hook = Box<dyn Fn(&PanicHookInfo<'_>) + Send + Sync + 'static>;
+
+struct PanicHookGuard {
+    previous: Option<Arc<Hook>>,
+}
+
+impl PanicHookGuard {
+    fn install() -> Self {
+        let previous = Arc::new(panic::take_hook());
+        let hook = Arc::clone(&previous);
+        panic::set_hook(Box::new(move |info| {
+            restore();
+            hook(info);
+        }));
+        Self {
+            previous: Some(previous),
+        }
+    }
+
+    fn run<T>(self, operation: impl FnOnce() -> T) -> T {
+        // set_hook is forbidden while panicking. Catch first, remove added
+        // wrappers and restore the original hook, then resume unwinding.
+        let result = panic::catch_unwind(AssertUnwindSafe(operation));
+        drop(self);
+        match result {
+            Ok(value) => value,
+            Err(payload) => panic::resume_unwind(payload),
+        }
+    }
+}
+
+impl Drop for PanicHookGuard {
+    fn drop(&mut self) {
+        // Dropping the installed chain releases its reference to the original
+        // hook. Restore the original box rather than stacking another wrapper.
+        drop(panic::take_hook());
+        if let Some(previous) = self.previous.take() {
+            let hook = Arc::try_unwrap(previous)
+                .unwrap_or_else(|hook| Box::new(move |info| hook(info)));
+            panic::set_hook(hook);
+        }
+    }
+}
 
 /// Best effort cleanup attempts every mode even if an earlier operation fails.
 fn restore() {
@@ -27,16 +75,7 @@ pub(super) fn run(
     mut state: UiState,
 ) -> io::Result<Option<crate::edit::model::Document>> {
     let _guard = Guard;
-    let old_hook = Arc::new(std::panic::take_hook());
-    let hook = Arc::clone(&old_hook);
-    std::panic::set_hook(Box::new(move |info| {
-        restore();
-        hook(info);
-    }));
-    let result = run_loop(&mut state);
-    // Replace Ratatui's added hook so repeated invocations do not stack it.
-    std::panic::set_hook(Box::new(move |info| old_hook(info)));
-    result
+    PanicHookGuard::install().run(|| run_loop(&mut state))
 }
 
 fn run_loop(

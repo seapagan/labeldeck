@@ -19,7 +19,7 @@ impl UiState {
         let enabled = [
             self.document.can_undo(),
             self.document.can_redo(),
-            self.dirty(),
+            self.apply_available(),
             true,
         ];
         let mut x = area.x;
