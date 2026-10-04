@@ -208,3 +208,217 @@ fn quit_escape_and_ctrl_c_cancel_cleanly_from_submodes() {
     screen(&mut ui, 20, 5);
     assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
 }
+
+#[test]
+fn keyboard_buttons_support_history_apply_and_cancel_without_mouse() {
+    let mut ui = state(false);
+    key(&mut ui, KeyCode::Delete);
+    key(&mut ui, KeyCode::Tab);
+    key(&mut ui, KeyCode::Enter);
+    assert_eq!(ui.document().labels().unwrap().len(), 2);
+    key(&mut ui, KeyCode::Tab);
+    key(&mut ui, KeyCode::Enter);
+    assert_eq!(ui.document().labels().unwrap().len(), 1);
+    key(&mut ui, KeyCode::Tab);
+    key(&mut ui, KeyCode::Enter);
+    assert!(screen(&mut ui, 80, 24).contains("Confirm Apply"));
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::BackTab);
+    key(&mut ui, KeyCode::BackTab);
+    key(&mut ui, KeyCode::BackTab);
+    assert!(matches!(
+        key(&mut ui, KeyCode::Enter),
+        Some(UiAction::Cancel)
+    ));
+}
+
+#[test]
+fn clickable_history_and_confirmation_buttons_follow_current_layout() {
+    let mouse = |kind, x, y| {
+        Event::Mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    let mut ui = state(false);
+    key(&mut ui, KeyCode::Delete);
+    screen(&mut ui, 80, 24);
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 23));
+    assert_eq!(ui.document().labels().unwrap().len(), 2);
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 22, 23));
+    assert_eq!(ui.document().labels().unwrap().len(), 1);
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 42, 23));
+    screen(&mut ui, 80, 24);
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 42, 23));
+    assert!(!screen(&mut ui, 80, 24).contains("Confirm Apply"));
+    ctrl(&mut ui, 's');
+    screen(&mut ui, 80, 24);
+    assert!(ui.handle(mouse(MouseEventKind::Moved, 2, 23)).is_none());
+    assert!(matches!(
+        ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 23)),
+        Some(UiAction::Apply(_))
+    ));
+}
+
+#[test]
+fn invalid_apply_keeps_editor_open_and_input_mouse_never_mutates() {
+    let mut ui = state(false);
+    key(&mut ui, KeyCode::Char('n'));
+    key(&mut ui, KeyCode::Esc);
+    ctrl(&mut ui, 's');
+    assert!(screen(&mut ui, 80, 24).contains("must not be empty"));
+    key(&mut ui, KeyCode::Enter);
+    screen(&mut ui, 80, 24);
+    ui.handle(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 70,
+        row: 23,
+        modifiers: KeyModifiers::NONE,
+    }));
+    assert!(screen(&mut ui, 80, 24).contains("Editing Name"));
+}
+
+#[test]
+fn release_keys_resize_focus_and_outside_clicks_do_not_edit_document() {
+    let mut ui = state(false);
+    screen(&mut ui, 80, 24);
+    let mut event = KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE);
+    event.kind = crossterm::event::KeyEventKind::Release;
+    ui.handle(Event::Key(event));
+    ui.handle(Event::Resize(100, 30));
+    ui.handle(Event::FocusLost);
+    ui.handle(Event::Paste("ignored".into()));
+    ctrl(&mut ui, 'a');
+    key(&mut ui, KeyCode::Char('x'));
+    for kind in [
+        MouseEventKind::Moved,
+        MouseEventKind::Down(MouseButton::Left),
+    ] {
+        ui.handle(Event::Mouse(MouseEvent {
+            kind,
+            column: 79,
+            row: 20,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+    assert!(!ui.document().can_undo());
+    screen(&mut ui, 20, 5);
+    assert!(key(&mut ui, KeyCode::Char('x')).is_none());
+    assert!(matches!(key(&mut ui, KeyCode::Esc), Some(UiAction::Cancel)));
+}
+
+#[test]
+fn filter_typing_and_field_cycles_preserve_unicode_and_valid_selection() {
+    let mut ui = state(false);
+    key(&mut ui, KeyCode::Char('/'));
+    for c in "docs".chars() {
+        key(&mut ui, KeyCode::Char(c));
+    }
+    key(&mut ui, KeyCode::Enter);
+    assert_eq!(ui.selected(), Some(1));
+    key(&mut ui, KeyCode::Up);
+    key(&mut ui, KeyCode::Char('e'));
+    key(&mut ui, KeyCode::BackTab);
+    key(&mut ui, KeyCode::Tab);
+    ui.handle(Event::Paste("界é".into()));
+    assert!(screen(&mut ui, 48, 16).contains("界"));
+    key(&mut ui, KeyCode::Enter);
+    assert_eq!(ui.document().labels().unwrap()[1].name, "docs界é");
+}
+
+#[test]
+fn swatches_use_colour_only_when_capability_allows() {
+    for level in [
+        ColorLevel::TrueColor,
+        ColorLevel::Ansi256,
+        ColorLevel::Ansi16,
+        ColorLevel::NoColor,
+    ] {
+        let mut ui = UiState::new(
+            Document::from_labels(vec![label("bug")]),
+            "colours".into(),
+            false,
+            level,
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui.render(f)).unwrap();
+        let cells: Vec<_> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|c| c.symbol() == "■")
+            .collect();
+        assert_eq!(cells.len(), 1);
+        assert_eq!(
+            cells[0].fg == ratatui::style::Color::Reset,
+            level == ColorLevel::NoColor
+        );
+        ctrl(&mut ui, 's');
+        assert!(screen(&mut ui, 80, 24).contains("remain in memory"));
+        key(&mut ui, KeyCode::Char('x'));
+        key(&mut ui, KeyCode::Right);
+        key(&mut ui, KeyCode::Left);
+        key(&mut ui, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn event_loop_drives_cancel_apply_and_input_failure_with_test_backend() {
+    use labeldeck::edit::ui::drive;
+    for apply in [false, true] {
+        let mut ui = state(false);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let keys = if apply {
+            vec![
+                (KeyCode::Char('s'), KeyModifiers::CONTROL),
+                (KeyCode::Tab, KeyModifiers::NONE),
+                (KeyCode::Enter, KeyModifiers::NONE),
+            ]
+        } else {
+            vec![(KeyCode::Esc, KeyModifiers::NONE)]
+        };
+        let mut keys = keys.into_iter();
+        let result = drive(&mut terminal, &mut ui, || {
+            let (code, modifiers) =
+                keys.next().expect("loop must finish before events run out");
+            Ok(Event::Key(KeyEvent::new(code, modifiers)))
+        })
+        .unwrap();
+        assert_eq!(result.is_some(), apply);
+    }
+    let mut ui = state(false);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let error = drive(&mut terminal, &mut ui, || {
+        Err(std::io::Error::other("event read failed"))
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "event read failed");
+}
+
+#[test]
+fn scroll_offset_and_mouse_selection_match_visible_rows_after_resize() {
+    let mut ui = UiState::new(
+        Document::from_labels(
+            (0..50).map(|i| label(&format!("label-{i:02}"))).collect(),
+        ),
+        "scroll".into(),
+        false,
+        ColorLevel::NoColor,
+    );
+    for _ in 0..30 {
+        key(&mut ui, KeyCode::Down);
+    }
+    let rendered = screen(&mut ui, 80, 24);
+    assert!(rendered.contains("label-30"));
+    ui.handle(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 2,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    }));
+    assert!(ui.selected().unwrap() > 0);
+    assert!(screen(&mut ui, 48, 16).contains("label-"));
+}

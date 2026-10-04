@@ -12,6 +12,25 @@ use colored_text::{ColorLevel, ColorizeConfig, RenderTarget};
 use ratatui::{layout::Rect, widgets::TableState};
 use tui_input::Input;
 
+/// Drive the same rendering/event loop with any synchronous terminal backend.
+/// Source persistence remains outside this loop, after terminal restoration.
+pub fn drive<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+    state: &mut UiState,
+    mut read: impl FnMut() -> std::io::Result<crossterm::event::Event>,
+) -> std::io::Result<Option<Document>> {
+    loop {
+        terminal
+            .draw(|frame| state.render(frame))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        match state.handle(read()?) {
+            Some(UiAction::Cancel) => return Ok(None),
+            Some(UiAction::Apply(document)) => return Ok(Some(document)),
+            None => {}
+        }
+    }
+}
+
 pub enum UiAction {
     Cancel,
     Apply(Document),

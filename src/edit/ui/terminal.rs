@@ -1,4 +1,4 @@
-use super::{UiAction, UiState};
+use super::{UiState, drive};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture,
@@ -44,12 +44,5 @@ fn run_loop(
 ) -> io::Result<Option<crate::edit::model::Document>> {
     let mut terminal = ratatui::try_init()?;
     execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    loop {
-        terminal.draw(|frame| state.render(frame))?;
-        match state.handle(event::read()?) {
-            Some(UiAction::Cancel) => return Ok(None),
-            Some(UiAction::Apply(document)) => return Ok(Some(document)),
-            None => {}
-        }
-    }
+    drive(&mut terminal, state, event::read)
 }

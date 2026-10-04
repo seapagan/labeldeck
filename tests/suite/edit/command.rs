@@ -1,4 +1,122 @@
 use super::label;
+
+#[test]
+fn file_session_cancel_and_apply_use_loaded_snapshot_without_terminal() {
+    use labeldeck::commands::edit::edit_file_with;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("deck.json");
+    let bytes = labeldeck::canonical::to_json(&mut [label("A")]);
+    std::fs::write(&path, &bytes).unwrap();
+    let selection = SourceSelection::Explicit(path.clone());
+    assert_eq!(
+        edit_file_with(&selection, |doc, title, live| {
+            assert!(!live);
+            assert!(title.contains("deck.json"));
+            assert_eq!(doc.labels().unwrap(), vec![label("A")]);
+            Ok(None)
+        })
+        .unwrap(),
+        0
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+    assert_eq!(
+        edit_file_with(&selection, |_, _, _| Ok(Some(changed_document())))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        labeldeck::canonical::parse(&std::fs::read_to_string(path).unwrap())
+            .unwrap(),
+        vec![label("B")]
+    );
+}
+
+#[test]
+fn live_session_cancel_only_fetches_and_apply_refetches_before_patch() {
+    use labeldeck::commands::edit::edit_remote_with;
+    for apply in [false, true] {
+        let mut expectations = vec![
+            Expectation::get("/repos/o/r/labels?per_page=100")
+                .labels_page(&labels_json(&[("A", "ededed", Some(""))]), None),
+        ];
+        if apply {
+            expectations.push(expectations[0].clone());
+            expectations.push(Expectation::patch("/repos/o/r/labels/A"));
+        }
+        let mock = mock_github(expectations);
+        let client = GitHubClient::with_options(mock.base_url(), None, true);
+        assert_eq!(
+            edit_remote_with(
+                &client,
+                &RepoSpec::parse("o/r").unwrap(),
+                |doc, title, live| {
+                    assert!(live);
+                    assert!(title.contains("o/r"));
+                    assert_eq!(doc.labels().unwrap(), vec![label("A")]);
+                    Ok(apply.then(changed_document))
+                }
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(mock.requests().len(), if apply { 3 } else { 1 });
+        mock.assert_satisfied();
+    }
+}
+
+#[test]
+fn exact_file_read_errors_and_invalid_utf8_never_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(
+        load_file(&SourceSelection::Remote(RepoSpec::parse("o/r").unwrap()))
+            .is_err()
+    );
+    assert!(
+        load_file(&SourceSelection::Explicit(root.path().into())).is_err()
+    );
+    let path = root.path().join("bad.json");
+    std::fs::write(&path, [255u8]).unwrap();
+    assert!(load_file(&SourceSelection::Explicit(path)).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_non_utf8_paths_remain_supported_by_cli() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let path = OsString::from_vec(vec![b'x', 255]);
+    let cli = Cli::try_parse_from([
+        OsString::from("labeldeck"),
+        OsString::from("edit"),
+        OsString::from("--file"),
+        path.clone(),
+    ])
+    .unwrap();
+    assert!(
+        matches!(cli.command,Command::Edit {file:Some(file),..} if file.as_os_str() == path)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn local_apply_keeps_staged_write_symlink_policy() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target.json");
+    let path = root.path().join("link.json");
+    std::fs::write(&target, "[]").unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    let result = apply_file(&path, &[label("A")], b"[]", &changed_document());
+    assert_eq!(result.unwrap(), 0);
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        std::fs::read_to_string(target).unwrap(),
+        labeldeck::canonical::to_json(&mut [label("B")])
+    );
+}
 use crate::common::{
     Expectation, Isolation, labels_json, mock_github, run, stderr,
 };

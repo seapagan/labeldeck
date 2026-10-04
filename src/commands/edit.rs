@@ -126,32 +126,46 @@ pub fn run(
                 no_proxy,
             )?;
             let client = super::github_client(Some(&credentials), no_proxy);
-            let baseline = super::remote_labels(&client, &repo)?;
-            let title = format!("{}/{} (live)", repo.owner, repo.name);
-            match open(Document::from_labels(baseline.clone()), &title, true)?
-            {
-                Some(document) => {
-                    apply_remote(&client, &repo, &baseline, &document)
-                }
-                None => cancelled(),
-            }
+            edit_remote_with(&client, &repo, open)
         }
-        selection => {
-            let snapshot = load_file(&selection)?;
-            match open(
-                Document::from_labels(snapshot.baseline.clone()),
-                &snapshot.path.display().to_string(),
-                false,
-            )? {
-                Some(document) => apply_file(
-                    &snapshot.path,
-                    &snapshot.baseline,
-                    &snapshot.contents,
-                    &document,
-                ),
-                None => cancelled(),
-            }
-        }
+        selection => edit_file_with(&selection, open),
+    }
+}
+
+/// Run a file session with an editor driver; source loading and persistence
+/// remain identical for a real terminal and deterministic event-driven tests.
+pub fn edit_file_with(
+    selection: &SourceSelection,
+    editor: impl FnOnce(Document, &str, bool) -> Result<Option<Document>>,
+) -> Result<i32> {
+    let snapshot = load_file(selection)?;
+    let document = editor(
+        Document::from_labels(snapshot.baseline.clone()),
+        &snapshot.path.display().to_string(),
+        false,
+    )?;
+    match document {
+        Some(document) => apply_file(
+            &snapshot.path,
+            &snapshot.baseline,
+            &snapshot.contents,
+            &document,
+        ),
+        None => cancelled(),
+    }
+}
+
+/// Run a live session using an already authenticated client.
+pub fn edit_remote_with(
+    client: &GitHubClient,
+    repo: &RepoSpec,
+    editor: impl FnOnce(Document, &str, bool) -> Result<Option<Document>>,
+) -> Result<i32> {
+    let baseline = super::remote_labels(client, repo)?;
+    let title = format!("{}/{} (live)", repo.owner, repo.name);
+    match editor(Document::from_labels(baseline.clone()), &title, true)? {
+        Some(document) => apply_remote(client, repo, &baseline, &document),
+        None => cancelled(),
     }
 }
 
