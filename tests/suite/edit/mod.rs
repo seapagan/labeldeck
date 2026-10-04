@@ -1,6 +1,8 @@
+pub mod color;
 pub mod execute;
 pub mod model;
 pub mod plan;
+pub mod ui;
 
 use labeldeck::labels::{Label, LabelColor};
 
