@@ -20,16 +20,16 @@ you enable pruning.
 
 ```console
 # Export a repository's labels to labels.json
-$ labeldeck export seapagan/keyhold
+labeldeck export seapagan/keyhold
 
 # Edit the file
-$ labeldeck edit
+labeldeck edit
 
 # Preview changes to a target repository
-$ labeldeck diff seapagan/lsplus
+labeldeck diff seapagan/lsplus
 
 # Apply the changes
-$ labeldeck sync seapagan/lsplus
+labeldeck sync seapagan/lsplus
 ```
 
 ## Commands
@@ -54,8 +54,8 @@ Export writes to `./labels.json` by default. Choose another destination with
 `--file PATH`, or save a [global default deck](#the-global-default-deck) with `--global`:
 
 ```console
-$ labeldeck export seapagan/keyhold --file team-labels.json
-$ labeldeck export seapagan/keyhold --global
+labeldeck export seapagan/keyhold --file team-labels.json
+labeldeck export seapagan/keyhold --global
 ```
 
 Use `--force` to overwrite an existing destination. To pipe JSON to another
@@ -69,8 +69,8 @@ Compare a [selected deck](#the-global-default-deck) with the live repository
 without changing either:
 
 ```console
-$ labeldeck diff seapagan/lsplus
-$ labeldeck diff seapagan/lsplus --file team-labels.json --prune
+labeldeck diff seapagan/lsplus
+labeldeck diff seapagan/lsplus --file team-labels.json --prune
 ```
 
 The output shows one action per label:
@@ -91,10 +91,10 @@ With pruning enabled, extra labels appear as `DELETE`; otherwise they appear as
 Open an existing deck or edit live repository labels:
 
 ```console
-$ labeldeck edit                       # Local labels.json
-$ labeldeck edit --global              # Global default deck
-$ labeldeck edit --file team-labels.json
-$ labeldeck edit seapagan/keyhold       # Live GitHub labels
+labeldeck edit                       # Local labels.json
+labeldeck edit --global              # Global default deck
+labeldeck edit --file team-labels.json
+labeldeck edit seapagan/keyhold       # Live GitHub labels
 ```
 
 Choose one source. Local edit opens `./labels.json` without a global fallback;
@@ -145,9 +145,9 @@ retrying: completed changes remain in effect.
 Apply a [selected deck](#the-global-default-deck) to a repository:
 
 ```console
-$ labeldeck sync seapagan/lsplus
-$ labeldeck sync seapagan/lsplus --file team-labels.json
-$ labeldeck sync seapagan/lsplus --prune --dry-run
+labeldeck sync seapagan/lsplus
+labeldeck sync seapagan/lsplus --file team-labels.json
+labeldeck sync seapagan/lsplus --prune --dry-run
 ```
 
 Use `--dry-run` to preview changes. Use `--prune` to delete labels absent from
@@ -161,8 +161,8 @@ changes. Completed changes remain in effect.
 Copy labels from one repository to another without a local JSON file:
 
 ```console
-$ labeldeck copy seapagan/template seapagan/new-project
-$ labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
+labeldeck copy seapagan/template seapagan/new-project
+labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
 ```
 
 Copy updates the target and leaves the source unchanged. Extra target labels
@@ -182,7 +182,7 @@ The same [authentication](#authentication) token must cover both repositories.
 Save a reusable label set in your [configuration directory](#configuration):
 
 ```console
-$ labeldeck export seapagan/labeldeck --global
+labeldeck export seapagan/labeldeck --global
 ```
 
 `diff` and `sync` select their deck in this order:
@@ -227,9 +227,9 @@ An empty deck (`[]`) is valid. **Syncing it with pruning enabled deletes all lab
 ## Authentication
 
 ```console
-$ labeldeck auth login
-$ labeldeck auth status
-$ labeldeck auth logout
+labeldeck auth login
+labeldeck auth status
+labeldeck auth logout
 ```
 
 Login prompts for a hidden token, validates it, and stores it. Use
@@ -299,7 +299,7 @@ Set `NO_COLOR` to disable colour output, including editor swatches.
 Download from the [releases page](https://github.com/seapagan/labeldeck/releases). Every archive has a `.sha256` sidecar; verify before use:
 
 ```console
-$ sha256sum -c labeldeck-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c labeldeck-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 ```
 
 Published targets:
@@ -322,7 +322,7 @@ The installer verifies the checksum and validates the downloaded binary before r
 #### Unix installer (Linux/macOS)
 
 ```console
-$ curl -fsSL https://raw.githubusercontent.com/seapagan/labeldeck/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/seapagan/labeldeck/main/install.sh | sh
 ```
 
 The installer selects a compatible binary and verifies its SHA-256 checksum. Set `LABELDECK_VERSION` to choose a release, or `LABELDECK_LIBC=gnu|musl` to override libc selection on Linux.
@@ -345,13 +345,13 @@ The installer supports x64 and ARM64 and verifies the SHA-256 checksum. Set `LAB
 ### cargo-binstall
 
 ```console
-$ cargo binstall labeldeck
+cargo binstall labeldeck
 ```
 
 ### From source
 
 ```console
-$ cargo install --locked --git https://github.com/seapagan/labeldeck
+cargo install --locked --git https://github.com/seapagan/labeldeck
 ```
 
 Building from source requires Rust **1.88.0** or newer.
