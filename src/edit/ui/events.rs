@@ -8,7 +8,10 @@ use crossterm::event::{
     MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Position;
-use tui_input::{Input, InputRequest, backend::crossterm::EventHandler};
+use tui_input::{
+    Input, InputRequest,
+    backend::crossterm::{EventHandler, to_input_request},
+};
 
 impl UiState {
     pub fn handle(&mut self, event: Event) -> Option<UiAction> {
@@ -197,7 +200,14 @@ impl UiState {
                             form.field = form.field.next(false)
                         }
                         _ => {
-                            form.input().handle_event(&Event::Key(key));
+                            if let Some(request) =
+                                to_input_request(&Event::Key(key))
+                            {
+                                self.error = form
+                                    .handle(request)
+                                    .err()
+                                    .unwrap_or_default();
+                            }
                         }
                     }
                 }
@@ -225,19 +235,18 @@ impl UiState {
         if self.modal.is_some() {
             return;
         }
-        let input = match &mut self.mode {
-            Mode::Edit(form) => form.input(),
-            Mode::Filter { input, .. } => input,
-            _ => return,
-        };
-        for ch in text.chars().filter(|ch| !ch.is_control()) {
-            input.handle(InputRequest::InsertChar(ch));
-        }
-        if matches!(self.mode, Mode::Filter { .. }) {
-            if let Mode::Filter { input, .. } = &self.mode {
-                self.filter = input.value().into();
+        match &mut self.mode {
+            Mode::Edit(form) => {
+                self.error = form.insert(text).err().unwrap_or_default();
             }
-            self.repair_selection();
+            Mode::Filter { input, .. } => {
+                for ch in text.chars().filter(|ch| !ch.is_control()) {
+                    input.handle(InputRequest::InsertChar(ch));
+                }
+                self.filter = input.value().into();
+                self.repair_selection();
+            }
+            _ => {}
         }
     }
 

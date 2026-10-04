@@ -137,10 +137,16 @@ A new committed edit after Undo clears Redo.
 
 Buttons, list rows, and form fields support mouse clicks; the mouse wheel
 navigates labels. The footer groups Undo, Redo, Apply, and Cancel on the left
-and shows their shortcuts directly. The form marks its focused field with a
-local highlight and a selection marker, beside a continuous left border.
+and shows their shortcuts directly. The form highlights only its focused
+value beside a continuous left border; labels and values keep their positions
+when editing begins. Under `NO_COLOR`, bold and reverse styling mark the
+focused value, including when it is empty.
 Colour previews use a small `■` swatch and update as soon as a draft is valid;
 incomplete colours are allowed while typing and validated when saving the form.
+Color accepts at most six ASCII hex digits and normalises uppercase letters
+to lowercase. Name and Description accept at most 50 and 100 Unicode
+characters respectively. Invalid or overlong insertions show a status message;
+pastes are rejected as a whole rather than truncated.
 Confirmation defaults to Back. Left/Right or Tab/Shift-Tab selects Apply/Back,
 Enter activates the choice, and Esc returns to the editor.
 Colour swatches respect terminal capabilities through colored_text and

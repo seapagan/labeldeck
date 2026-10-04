@@ -2,6 +2,7 @@ pub mod color;
 pub mod command;
 pub mod execute;
 pub mod form;
+pub mod input;
 pub mod model;
 pub mod plan;
 pub mod rendering;

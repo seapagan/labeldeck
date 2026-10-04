@@ -9,7 +9,7 @@ use labeldeck::edit::ui::UiState;
 use ratatui::style::{Color, Modifier};
 
 #[test]
-fn edit_focus_is_local_without_underlines_and_moves_between_fields() {
+fn only_editable_values_receive_local_focus_without_underlines_or_markers() {
     for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
         let mut ui = UiState::new(
             state(false).document().clone(),
@@ -25,24 +25,40 @@ fn edit_focus_is_local_without_underlines_and_moves_between_fields() {
             ("Color", KeyCode::Up),
         ] {
             let buffer = draw(&mut ui, 100, 24);
-            locate(&buffer, &format!("> {focused}"));
             for title in ["Name", "Color", "Description"] {
                 let (x, y) = locate(&buffer, title);
+                let value_x = x + 15 + if title == "Color" { 2 } else { 0 };
                 for cell in (2..100).map(|x| &buffer[(x, y)]) {
                     assert!(!cell.modifier.contains(Modifier::UNDERLINED));
                 }
                 assert_eq!(
-                    buffer[(x, y)].modifier.contains(Modifier::BOLD),
+                    buffer[(value_x, y)].modifier.contains(Modifier::BOLD),
                     title == focused
                 );
                 assert_eq!(
-                    buffer[(x, y)].bg,
+                    buffer[(value_x, y)].bg,
                     if title == focused && level != ColorLevel::NoColor {
                         Color::DarkGray
                     } else {
                         Color::Reset
                     }
                 );
+                assert_eq!(buffer[(x, y)].bg, Color::Reset);
+                assert!(!buffer[(x, y)].modifier.contains(Modifier::BOLD));
+                assert!(!buffer[(x, y)].modifier.contains(Modifier::REVERSED));
+                assert_eq!(
+                    buffer[(value_x, y)].modifier.contains(Modifier::REVERSED),
+                    title == focused && level == ColorLevel::NoColor
+                );
+                assert!(!row(&buffer, y).contains('>'));
+                if title == "Color" {
+                    assert_eq!(buffer[(value_x - 2, y)].bg, Color::Reset);
+                    assert!(
+                        !buffer[(value_x - 2, y)]
+                            .modifier
+                            .contains(Modifier::REVERSED)
+                    );
+                }
                 assert!(!buffer[(70, y)].modifier.contains(Modifier::BOLD));
                 assert_eq!(buffer[(70, y)].bg, Color::Reset);
             }
@@ -85,9 +101,9 @@ fn edit_accent_is_continuous_with_breathing_room_even_at_minimum_size() {
                     .all(|c| c.fg == Color::Reset && c.bg == Color::Reset)
             );
         } else {
-            let (_, focused_y) = locate(&buffer, "> Name");
-            assert_eq!(buffer[(3, focused_y)].bg, Color::DarkGray);
-            assert_eq!(buffer[(3, focused_y + 1)].bg, Color::Reset);
+            let (_, focused_y) = locate(&buffer, "Name");
+            assert_eq!(buffer[(17, focused_y)].bg, Color::DarkGray);
+            assert_eq!(buffer[(17, focused_y + 1)].bg, Color::Reset);
             assert_eq!(buffer[(47, focused_y)].bg, Color::Reset);
         }
     }
@@ -107,7 +123,32 @@ fn long_unicode_drafts_scroll_inside_bounded_local_fields() {
     let (_, y) = locate(&buffer, "Color");
     // Unused cells must not act as an oversized field hitbox.
     click(&mut ui, 47, y + 1);
-    assert!(row(&draw(&mut ui, 48, 16), y).contains("> Color"));
+    super::rendering::assert_focus(&mut ui, "Color");
+}
+
+#[test]
+fn view_and_edit_labels_values_and_swatches_keep_the_same_horizontal_alignment()
+ {
+    for width in [48, 80, 140] {
+        let mut ui = state(false);
+        let before = draw(&mut ui, width, 24);
+        key(&mut ui, KeyCode::Enter);
+        let editing = draw(&mut ui, width, 24);
+        for title in ["Name", "Color", "Description"] {
+            let (x, y) = locate(&before, title);
+            assert_eq!(locate(&editing, title), (x, y));
+            assert_eq!(x, 2);
+            for column in x..width {
+                assert_eq!(
+                    before[(column, y)].symbol(),
+                    editing[(column, y)].symbol()
+                );
+            }
+        }
+        key(&mut ui, KeyCode::Esc);
+        let cancelled = draw(&mut ui, width, 24);
+        assert_eq!(locate(&cancelled, "Color"), locate(&before, "Color"));
+    }
 }
 
 #[test]

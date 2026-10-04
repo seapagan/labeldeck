@@ -1,5 +1,6 @@
 use super::{
     label,
+    rendering::assert_focus,
     ui::{ctrl, key, screen, state},
 };
 use crossterm::event::{Event, KeyCode};
@@ -18,17 +19,17 @@ fn entire_form_is_a_single_edit_with_one_undo_and_redo() {
     for opener in [KeyCode::Enter, KeyCode::Char('e')] {
         let mut ui = state(false);
         key(&mut ui, opener);
-        assert!(screen(&mut ui, 80, 24).contains("> Name"));
+        assert_focus(&mut ui, "Name");
         replace(&mut ui, "defect");
         key(&mut ui, KeyCode::Down);
-        assert!(screen(&mut ui, 80, 24).contains("> Color"));
+        assert_focus(&mut ui, "Color");
         replace(&mut ui, "ff0000");
         key(&mut ui, KeyCode::Tab);
         replace(&mut ui, "new description");
         key(&mut ui, KeyCode::Up);
         key(&mut ui, KeyCode::BackTab);
         let draft = screen(&mut ui, 80, 24);
-        for text in ["defect", "ff0000", "new description", "> Name"] {
+        for text in ["defect", "ff0000", "new description"] {
             assert!(draft.contains(text), "{text}: {draft}");
         }
         assert_eq!(
@@ -104,9 +105,7 @@ fn new_form_commit_records_creation_once_and_cancel_preserves_redo() {
 fn invalid_form_preserves_drafts_and_focuses_offending_field() {
     for (field, value, error) in [
         (0, String::new(), "must not be empty"),
-        (0, "x".repeat(51), "50-character"),
         (1, "fff".into(), "6 hexadecimal"),
-        (2, "x".repeat(101), "100-character"),
     ] {
         let mut ui = state(false);
         key(&mut ui, KeyCode::Enter);
@@ -118,9 +117,7 @@ fn invalid_form_preserves_drafts_and_focuses_offending_field() {
         key(&mut ui, KeyCode::Enter);
         let rendered = screen(&mut ui, 160, 24);
         assert!(rendered.contains(error), "{rendered}");
-        assert!(
-            rendered.contains(["> Name", "> Color", "> Description"][field])
-        );
+        assert_focus(&mut ui, ["Name", "Color", "Description"][field]);
         assert!(rendered.contains(&value));
         assert_eq!(
             ui.document().labels().unwrap(),

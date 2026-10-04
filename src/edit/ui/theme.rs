@@ -65,6 +65,9 @@ impl UiTheme {
             Help | Disabled => style.add_modifier(Modifier::DIM),
             _ => style,
         };
+        if !self.colour && matches!(role, FocusedField) {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
         if self.dimmed {
             style = style
                 .bg(Color::Reset)

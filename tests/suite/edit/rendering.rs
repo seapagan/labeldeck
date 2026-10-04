@@ -55,6 +55,14 @@ pub(super) fn click(ui: &mut UiState, x: u16, y: u16) -> Option<UiAction> {
     }))
 }
 
+pub(super) fn assert_focus(ui: &mut UiState, title: &str) {
+    let buffer = draw(ui, 160, 24);
+    let (x, y) = locate(&buffer, title);
+    let value_x = x + 15 + if title == "Color" { 2 } else { 0 };
+    assert!(buffer[(value_x, y)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(x, y)].bg, Color::Reset);
+}
+
 #[test]
 fn content_columns_are_bounded_unicode_aware_and_header_aligned() {
     for (name, color_x) in [
@@ -330,7 +338,7 @@ fn clicking_edit_fields_uses_rendered_rectangles_and_retains_drafts() {
         let pos = locate(&buffer, text);
         click(&mut ui, pos.0, pos.1);
         replace(&mut ui, draft);
-        assert!(screen(&mut ui, 80, 24).contains(&format!("> {text}")));
+        assert_focus(&mut ui, text);
     }
     assert!(!ui.document().can_undo());
     key(&mut ui, KeyCode::Enter);

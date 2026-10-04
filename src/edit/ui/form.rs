@@ -1,6 +1,9 @@
 use super::Field;
-use crate::edit::model::{Draft, EntryId};
-use tui_input::Input;
+use crate::{
+    edit::model::{Draft, EntryId},
+    labels::{LABEL_COLOR_LEN, MAX_DESCRIPTION_LEN, MAX_NAME_LEN},
+};
+use tui_input::{Input, InputRequest};
 
 pub(super) struct EditForm {
     pub id: Option<EntryId>,
@@ -20,6 +23,63 @@ impl EditForm {
 
     pub fn input(&mut self) -> &mut Input {
         &mut self.inputs[self.field as usize]
+    }
+
+    pub fn handle(&mut self, request: InputRequest) -> Result<(), String> {
+        if let InputRequest::InsertChar(ch) = request {
+            self.insert(&ch.to_string())
+        } else {
+            self.input().handle(request);
+            Ok(())
+        }
+    }
+
+    pub fn insert(&mut self, text: &str) -> Result<(), String> {
+        let text = if self.field == Field::Color {
+            if !text.bytes().all(|ch| ch.is_ascii_hexdigit()) {
+                return Err(
+                    "Color must contain only hexadecimal digits (0-9, A-F)."
+                        .into(),
+                );
+            }
+            text.to_ascii_lowercase()
+        } else {
+            text.chars().filter(|ch| !ch.is_control()).collect()
+        };
+        let (limit, message) = match self.field {
+            Field::Name => (
+                MAX_NAME_LEN,
+                format!(
+                    "Label names are limited to {MAX_NAME_LEN} characters."
+                ),
+            ),
+            Field::Color => (
+                LABEL_COLOR_LEN,
+                format!(
+                    "Color is limited to {LABEL_COLOR_LEN} hexadecimal digits."
+                ),
+            ),
+            Field::Description => (
+                MAX_DESCRIPTION_LEN,
+                format!(
+                    "Descriptions are limited to {MAX_DESCRIPTION_LEN} characters."
+                ),
+            ),
+        };
+        if self
+            .input()
+            .value()
+            .chars()
+            .count()
+            .saturating_add(text.chars().count())
+            > limit
+        {
+            return Err(message);
+        }
+        for ch in text.chars() {
+            self.input().handle(InputRequest::InsertChar(ch));
+        }
+        Ok(())
     }
 
     pub fn draft(&self) -> Draft {
@@ -87,7 +147,7 @@ impl super::UiState {
         .enumerate()
         {
             let y = area.y + 1 + index as u16;
-            let x = area.x + if form.is_some() { 2 } else { 0 };
+            let x = area.x + 2;
             let prefix = 15 + if field == Field::Color { 2 } else { 0 };
             let width = if form.is_some() {
                 (prefix
@@ -137,18 +197,9 @@ impl super::UiState {
         } else {
             Role::DetailValue
         };
-        frame.render_widget(Paragraph::new("").style(theme.style(role)), area);
         frame.render_widget(
-            Paragraph::new(format!(
-                "{} {:<13}",
-                if focused { ">" } else { " " },
-                field.title()
-            ))
-            .style(theme.style(if focused {
-                Role::FocusedField
-            } else {
-                Role::DetailLabel
-            })),
+            Paragraph::new(field.title())
+                .style(theme.style(Role::DetailLabel)),
             Rect::new(area.x, y, 15, 1),
         );
         let mut x = area.x + 15;

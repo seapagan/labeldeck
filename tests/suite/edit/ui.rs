@@ -1,4 +1,4 @@
-use super::label;
+use super::{label, rendering::assert_focus};
 use colored_text::ColorLevel;
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
@@ -91,7 +91,7 @@ fn navigation_filtering_and_selection_repair_are_presentation_only() {
 fn staged_edits_commit_once_and_history_discards_stale_input() {
     let mut ui = state(false);
     key(&mut ui, KeyCode::Enter);
-    assert!(screen(&mut ui, 80, 24).contains("> Name"));
+    assert_focus(&mut ui, "Name");
     ui.handle(Event::Paste(" new".into()));
     assert!(!ui.document().can_undo());
     key(&mut ui, KeyCode::Enter);
@@ -169,13 +169,13 @@ fn filtered_rename_keeps_field_traversal_on_the_edited_label() {
         }
         ui.handle(Event::Paste("new".into()));
         key(&mut ui, KeyCode::Tab);
-        assert!(screen(&mut ui, 80, 24).contains("> Color"));
+        assert_focus(&mut ui, "Color");
         assert_eq!(ui.selected(), Some(0));
         key(&mut ui, KeyCode::Tab);
-        assert!(screen(&mut ui, 80, 24).contains("> Description"));
+        assert_focus(&mut ui, "Description");
         ui.handle(Event::Paste("correct row".into()));
         key(&mut ui, KeyCode::BackTab);
-        assert!(screen(&mut ui, 80, 24).contains("> Color"));
+        assert_focus(&mut ui, "Color");
         key(&mut ui, KeyCode::Tab);
         screen(&mut ui, 80, 24);
         key(&mut ui, KeyCode::Enter);
@@ -314,7 +314,7 @@ fn invalid_apply_keeps_editor_open_and_input_mouse_never_mutates() {
         row: 23,
         modifiers: KeyModifiers::NONE,
     }));
-    assert!(screen(&mut ui, 80, 24).contains("> Name"));
+    assert_focus(&mut ui, "Name");
 }
 
 #[test]

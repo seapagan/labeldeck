@@ -18,6 +18,9 @@ pub const MAX_NAME_LEN: usize = 50;
 /// Maximum length GitHub accepts for a label description.
 pub const MAX_DESCRIPTION_LEN: usize = 100;
 
+/// Number of ASCII hexadecimal digits in a canonical label colour.
+pub const LABEL_COLOR_LEN: usize = 6;
+
 /// One canonical label definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Label {
@@ -39,16 +42,16 @@ impl LabelColor {
     /// error with an actionable message.
     pub fn parse(input: &str) -> Result<Self, String> {
         let digits = input.strip_prefix('#').unwrap_or(input);
-        if digits.len() != 6 {
+        if digits.len() != LABEL_COLOR_LEN {
             return Err(format!(
-                "invalid colour {input:?}: expected 6 hexadecimal digits, \
+                "invalid colour {input:?}: expected {LABEL_COLOR_LEN} hexadecimal digits, \
                  found {}",
                 digits.len()
             ));
         }
         if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(format!(
-                "invalid colour {input:?}: expected 6 hexadecimal digits"
+                "invalid colour {input:?}: expected {LABEL_COLOR_LEN} hexadecimal digits"
             ));
         }
         Ok(Self(digits.to_ascii_lowercase()))
