@@ -215,7 +215,7 @@ fn mouse_buttons_rows_and_wheel_use_rendered_hit_areas() {
             modifiers: KeyModifiers::NONE,
         })
     };
-    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 4));
+    ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 2, 5));
     assert_eq!(ui.selected(), Some(1));
     ui.handle(mouse(MouseEventKind::ScrollUp, 2, 3));
     assert_eq!(ui.selected(), Some(0));
@@ -451,7 +451,7 @@ fn scroll_offset_and_mouse_selection_match_visible_rows_after_resize() {
     ui.handle(Event::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 2,
-        row: 3,
+        row: 4,
         modifiers: KeyModifiers::NONE,
     }));
     assert!(ui.selected().unwrap() > 0);

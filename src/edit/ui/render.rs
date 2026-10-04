@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 const BOTTOM_CONTROLS_HEIGHT: u16 = 3;
+const TITLE_HEIGHT: u16 = 2; // Title plus one blank spacer row.
 
 pub(super) fn clean(text: &str) -> String {
     text.chars()
@@ -65,9 +66,13 @@ impl UiState {
         );
         let visible = visible_ids(&self.document, &self.filter);
         let height = (visible.len().max(1).saturating_add(2)).min(usize::from(
-            area.height - 1 - DETAIL_HEIGHT - BOTTOM_CONTROLS_HEIGHT,
+            area.height
+                - TITLE_HEIGHT
+                - DETAIL_HEIGHT
+                - BOTTOM_CONTROLS_HEIGHT,
         )) as u16;
-        let table_area = Rect::new(area.x, area.y + 1, area.width, height);
+        let table_area =
+            Rect::new(area.x, area.y + TITLE_HEIGHT, area.width, height);
         self.render_table(frame, table_area, &theme);
         let details =
             Rect::new(area.x, table_area.bottom(), area.width, DETAIL_HEIGHT);

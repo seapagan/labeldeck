@@ -136,7 +136,8 @@ A new committed edit after Undo clears Redo.
 | `q` or Esc at list level, Ctrl-C anywhere | Cancel |
 
 Buttons, list rows, and form fields support mouse clicks; the mouse wheel
-navigates labels. The footer groups Undo, Redo, Apply, and Cancel on the left
+navigates labels. A blank row separates the title from the table headers.
+The footer groups Undo, Redo, Apply, and Cancel on the left
 and shows their shortcuts directly. The form highlights only its focused
 value beside a continuous left border; labels and values keep their positions
 when editing begins. Under `NO_COLOR`, bold and reverse styling mark the

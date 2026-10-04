@@ -94,21 +94,21 @@ fn content_columns_are_bounded_unicode_aware_and_header_aligned() {
                     color_x
                 }
             );
-            assert_eq!(buffer[(x, 3)].symbol(), "■");
-            assert_eq!(buffer[(x + 2, 3)].symbol(), "e");
-            assert_eq!(buffer[(2, 1)].symbol(), "L");
+            assert_eq!(buffer[(x, 4)].symbol(), "■");
+            assert_eq!(buffer[(x + 2, 4)].symbol(), "e");
+            assert_eq!(buffer[(2, 2)].symbol(), "L");
             assert_eq!(
-                buffer[(2, 3)].symbol(),
+                buffer[(2, 4)].symbol(),
                 if name.starts_with('界') {
                     "界"
                 } else {
                     &name[..1]
                 }
             );
-            assert_eq!(row(&buffer, 2), "─".repeat(width as usize));
+            assert_eq!(row(&buffer, 3), "─".repeat(width as usize));
             if width >= 80 {
                 assert_eq!(locate(&buffer, "DESCRIPTION").0, x + 12);
-                assert_eq!(buffer[(x + 12, 3)].symbol(), "D");
+                assert_eq!(buffer[(x + 12, 4)].symbol(), "D");
             }
         }
     }
@@ -129,21 +129,21 @@ fn headers_and_selection_keep_hierarchy_without_inverting_swatches() {
             level,
         );
         let buffer = draw(&mut ui, 80, 24);
-        let header = &buffer[(2, 1)];
+        let header = &buffer[(2, 2)];
         assert!(header.modifier.contains(Modifier::BOLD));
         assert_eq!(header.fg == Color::Reset, level == ColorLevel::NoColor);
-        let selected = &buffer[(2, 3)];
+        let selected = &buffer[(2, 4)];
         assert!(selected.modifier.contains(Modifier::BOLD));
         assert!(!selected.modifier.contains(Modifier::REVERSED));
-        let swatch = &buffer[(16, 3)];
+        let swatch = &buffer[(16, 4)];
         assert_eq!(
             swatch.fg,
             labeldeck::edit::color::preview("ededed", level)
                 .unwrap_or(Color::Reset)
         );
         assert!(!swatch.modifier.contains(Modifier::REVERSED));
-        assert!(row(&buffer, 3).contains("■ ededed"));
-        assert!(row(&buffer, 6).contains("■ ededed"));
+        assert!(row(&buffer, 4).contains("■ ededed"));
+        assert!(row(&buffer, 7).contains("■ ededed"));
         if level == ColorLevel::NoColor {
             assert!(buffer.content().iter().all(|cell| cell.fg
                 == Color::Reset
@@ -245,13 +245,13 @@ fn short_and_filtered_decks_keep_details_close_and_bottom_controls_stable() {
     let mut ui = state(false);
     for height in [16, 24, 40] {
         let buffer = draw(&mut ui, 80, height);
-        assert_eq!(locate(&buffer, "Name").1, 6);
+        assert_eq!(locate(&buffer, "Name").1, 7);
         assert_eq!(locate(&buffer, "[^Z Undo]").1, height - 1);
     }
     key(&mut ui, KeyCode::Char('/'));
     ui.handle(Event::Paste("bug".into()));
     let buffer = draw(&mut ui, 80, 24);
-    assert_eq!(locate(&buffer, "Name").1, 5);
+    assert_eq!(locate(&buffer, "Name").1, 6);
     assert!(row(&buffer, 22).contains("Esc restore"));
     let mut ui = UiState::new(
         Document::from_labels(
@@ -267,7 +267,7 @@ fn short_and_filtered_decks_keep_details_close_and_bottom_controls_stable() {
     let buffer = draw(&mut ui, 48, 16);
     assert_eq!(locate(&buffer, "Name").1, 8);
     assert!(screen(&mut ui, 48, 16).contains("label-30"));
-    click(&mut ui, 2, 3);
+    click(&mut ui, 2, 4);
     assert!(ui.selected().unwrap() > 0);
     for size in [(47, 16), (48, 15), (0, 0)] {
         draw(&mut ui, size.0, size.1);

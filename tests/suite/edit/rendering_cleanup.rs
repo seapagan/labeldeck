@@ -9,6 +9,28 @@ use labeldeck::edit::ui::UiState;
 use ratatui::style::{Color, Modifier};
 
 #[test]
+fn title_has_one_blank_row_before_table_headers_with_matching_mouse_rows() {
+    for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
+        for (width, height) in [(48, 16), (80, 24), (140, 40)] {
+            let mut ui = UiState::new(
+                state(false).document().clone(),
+                "deck".into(),
+                false,
+                level,
+            );
+            let buffer = draw(&mut ui, width, height);
+            assert!(row(&buffer, 0).contains("labeldeck edit"));
+            assert!(row(&buffer, 1).trim().is_empty());
+            assert_eq!(locate(&buffer, "LABEL").1, 2);
+            assert_eq!(row(&buffer, 3), "─".repeat(width as usize));
+            click(&mut ui, 2, 5);
+            assert_eq!(ui.selected(), Some(1));
+            assert_eq!(locate(&buffer, "[^Z Undo]").1, height - 1);
+        }
+    }
+}
+
+#[test]
 fn only_editable_values_receive_local_focus_without_underlines_or_markers() {
     for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
         let mut ui = UiState::new(

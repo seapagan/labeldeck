@@ -373,7 +373,7 @@ fn deletion_reselects_same_visible_index_for_first_middle_last_and_only() {
                 );
                 if mouse_select {
                     draw(&mut ui, 80, 24);
-                    click(&mut ui, 2, 3 + index as u16);
+                    click(&mut ui, 2, 4 + index as u16);
                 } else {
                     for _ in 0..index {
                         key(&mut ui, KeyCode::Down);
@@ -428,7 +428,7 @@ fn filter_uses_names_and_clearing_retains_selected_identity() {
     assert_eq!(ui.selected(), Some(1));
     key(&mut ui, KeyCode::Enter);
     let buffer = draw(&mut ui, 140, 24);
-    assert!(!row(&buffer, 3).contains("bug"));
+    assert!(!row(&buffer, 4).contains("bug"));
     assert_eq!(visible_ids(ui.document(), "tE"), vec![1]);
     key(&mut ui, KeyCode::Char('/'));
     key(&mut ui, KeyCode::Home);
