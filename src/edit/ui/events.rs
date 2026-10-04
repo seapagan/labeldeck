@@ -15,56 +15,60 @@ use tui_input::{
 
 impl UiState {
     pub fn handle(&mut self, event: Event) -> Option<UiAction> {
-        if let Event::Key(key) = event {
-            if key.kind == KeyEventKind::Release {
-                return None;
-            }
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                && key.code == KeyCode::Char('c')
-            {
-                return Some(UiAction::Cancel);
-            }
-            if self.small {
-                return matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-                    .then_some(UiAction::Cancel);
-            }
-            if self.modal.is_some() {
-                return self.modal_key(key);
-            }
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                match key.code {
-                    KeyCode::Char('z' | 'y') => {
-                        self.mode = Mode::List;
-                        if key.code == KeyCode::Char('z') {
-                            self.document.undo();
-                        } else {
-                            self.document.redo();
-                        }
-                        self.error.clear();
-                        self.repair_selection();
-                        return None;
-                    }
-                    KeyCode::Char('s') if matches!(self.mode, Mode::List) => {
-                        self.confirm();
-                        return None;
-                    }
-                    _ => {}
-                }
-            }
-            return self.key(key);
-        }
         match event {
-            Event::Resize(width, height) => {
-                self.small = width < 48 || height < 16;
-                self.buttons.clear();
-                self.fields = [ratatui::layout::Rect::default(); 3];
-                self.rows = ratatui::layout::Rect::default();
-            }
+            Event::Key(key) => return self.handle_key(key),
+            Event::Resize(width, height) => self.resize(width, height),
             Event::Paste(text) => self.paste(&text),
             Event::Mouse(mouse) if !self.small => return self.mouse(mouse),
             _ => {}
         }
         None
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        self.small = width < 48 || height < 16;
+        self.buttons.clear();
+        self.fields = [ratatui::layout::Rect::default(); 3];
+        self.rows = ratatui::layout::Rect::default();
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> Option<UiAction> {
+        if key.kind == KeyEventKind::Release {
+            return None;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('c')
+        {
+            return Some(UiAction::Cancel);
+        }
+        if self.small {
+            return matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+                .then_some(UiAction::Cancel);
+        }
+        if self.modal.is_some() {
+            return self.modal_key(key);
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('z' | 'y') => {
+                    self.mode = Mode::List;
+                    if key.code == KeyCode::Char('z') {
+                        self.document.undo();
+                    } else {
+                        self.document.redo();
+                    }
+                    self.error.clear();
+                    self.repair_selection();
+                    return None;
+                }
+                KeyCode::Char('s') if matches!(self.mode, Mode::List) => {
+                    self.confirm();
+                    return None;
+                }
+                _ => {}
+            }
+        }
+        self.key(key)
     }
 
     fn key(&mut self, key: KeyEvent) -> Option<UiAction> {
@@ -296,34 +300,34 @@ impl UiState {
     }
 
     fn mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
-        let position = Position::new(mouse.column, mouse.row);
         if self.modal.is_some() {
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                if self.buttons.first().is_some_and(|r| r.contains(position)) {
-                    return Some(UiAction::Apply(self.document.clone()));
-                }
-                if self.buttons.get(1).is_some_and(|r| r.contains(position)) {
-                    self.dismiss_modal();
-                }
+            return self.modal_mouse(mouse);
+        }
+        match &mut self.mode {
+            Mode::Edit(form) => {
+                form_mouse(form, &self.fields, mouse);
+                None
             }
-            return None;
+            Mode::List => self.list_mouse(mouse),
+            _ => None,
         }
-        if let Mode::Edit(form) = &mut self.mode {
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                && let Some(i) =
-                    self.fields.iter().position(|r| r.contains(position))
-            {
-                form.field = [
-                    super::Field::Name,
-                    super::Field::Color,
-                    super::Field::Description,
-                ][i];
+    }
+
+    fn modal_mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
+        let position = Position::new(mouse.column, mouse.row);
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if self.buttons.first().is_some_and(|r| r.contains(position)) {
+                return Some(UiAction::Apply(self.document.clone()));
             }
-            return None;
+            if self.buttons.get(1).is_some_and(|r| r.contains(position)) {
+                self.dismiss_modal();
+            }
         }
-        if !matches!(self.mode, Mode::List) {
-            return None;
-        }
+        None
+    }
+
+    fn list_mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
+        let position = Position::new(mouse.column, mouse.row);
         match mouse.kind {
             MouseEventKind::ScrollUp => self.navigate(-1),
             MouseEventKind::ScrollDown => self.navigate(1),
@@ -345,5 +349,22 @@ impl UiState {
             _ => {}
         }
         None
+    }
+}
+
+fn form_mouse(
+    form: &mut EditForm,
+    fields: &[ratatui::layout::Rect; 3],
+    mouse: MouseEvent,
+) {
+    let position = Position::new(mouse.column, mouse.row);
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(i) = fields.iter().position(|r| r.contains(position))
+    {
+        form.field = [
+            super::Field::Name,
+            super::Field::Color,
+            super::Field::Description,
+        ][i];
     }
 }

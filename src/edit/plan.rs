@@ -75,6 +75,86 @@ struct Planner {
 }
 
 impl Planner {
+    fn new(document: &Document) -> Result<Self, String> {
+        let labels = document.labels()?;
+        let current: BTreeMap<_, _> = document
+            .entries()
+            .iter()
+            .filter_map(|e| e.original.clone().map(|label| (e.id, label)))
+            .collect();
+        let occupied = current
+            .iter()
+            .map(|(&id, label)| (label.match_key(), id))
+            .collect();
+        let mut reserved: BTreeSet<_> =
+            current.values().map(Label::match_key).collect();
+        reserved.extend(labels.iter().map(Label::match_key));
+        let deleting = document
+            .entries()
+            .iter()
+            .filter(|e| e.deleted && e.original.is_some())
+            .map(|e| e.id)
+            .collect();
+        Ok(Self {
+            current,
+            occupied,
+            reserved,
+            deleting,
+            counter: 0,
+            result: EditPlan::default(),
+        })
+    }
+
+    fn plan_entries(&mut self, document: &Document) -> Result<(), String> {
+        let mut renames = BTreeMap::new();
+        let mut creates = Vec::new();
+        let mut updates = Vec::new();
+        for entry in document.entries().iter().filter(|e| !e.deleted) {
+            let desired = entry.draft.label()?;
+            match &entry.original {
+                None => creates.push(desired),
+                Some(original) if original.name != desired.name => {
+                    renames.insert(entry.id, desired);
+                }
+                Some(original) if original != &desired => {
+                    updates.push(Operation::Update {
+                        current_name: original.name.clone(),
+                        desired,
+                    })
+                }
+                _ => {}
+            }
+        }
+        self.result.summary = ChangeSummary {
+            created: creates.len(),
+            renamed: renames.len(),
+            updated: updates.len(),
+            deleted: self.deleting.len(),
+        };
+        self.renames(renames);
+        self.result.operations.extend(updates);
+        self.append_creates(creates);
+        Ok(())
+    }
+
+    fn append_creates(&mut self, creates: Vec<Label>) {
+        for label in creates {
+            if let Some(&blocker) = self.occupied.get(&label.match_key()) {
+                // Final uniqueness guarantees only a deleted identity can block a create.
+                self.relocate(blocker);
+            }
+            self.result.operations.push(Operation::Create(label));
+        }
+    }
+
+    fn append_deletes(&mut self) {
+        for id in &self.deleting {
+            self.result.operations.push(Operation::Delete {
+                name: self.current[id].name.clone(),
+            });
+        }
+    }
+
     fn move_to(&mut self, id: EntryId, desired: Label, temporary: bool) {
         let old = self
             .current
@@ -141,72 +221,9 @@ impl Planner {
 }
 
 pub fn plan(document: &Document) -> Result<EditPlan, String> {
-    document.labels()?;
-    let current: BTreeMap<_, _> = document
-        .entries()
-        .iter()
-        .filter_map(|e| e.original.clone().map(|label| (e.id, label)))
-        .collect();
-    let occupied = current
-        .iter()
-        .map(|(&id, label)| (label.match_key(), id))
-        .collect();
-    let mut reserved: BTreeSet<_> =
-        current.values().map(Label::match_key).collect();
-    reserved.extend(document.labels()?.iter().map(Label::match_key));
-    let deleting = document
-        .entries()
-        .iter()
-        .filter(|e| e.deleted && e.original.is_some())
-        .map(|e| e.id)
-        .collect();
-    let mut planner = Planner {
-        current,
-        occupied,
-        reserved,
-        deleting,
-        counter: 0,
-        result: EditPlan::default(),
-    };
-    let mut renames = BTreeMap::new();
-    let mut creates = Vec::new();
-    let mut updates = Vec::new();
-    for entry in document.entries().iter().filter(|e| !e.deleted) {
-        let desired = entry.draft.label()?;
-        match &entry.original {
-            None => creates.push(desired),
-            Some(original) if original.name != desired.name => {
-                renames.insert(entry.id, desired);
-            }
-            Some(original) if original != &desired => {
-                updates.push(Operation::Update {
-                    current_name: original.name.clone(),
-                    desired,
-                })
-            }
-            _ => {}
-        }
-    }
-    planner.result.summary = ChangeSummary {
-        created: creates.len(),
-        renamed: renames.len(),
-        updated: updates.len(),
-        deleted: planner.deleting.len(),
-    };
-    planner.renames(renames);
-    planner.result.operations.extend(updates);
-    for label in creates {
-        if let Some(&blocker) = planner.occupied.get(&label.match_key()) {
-            // Final uniqueness guarantees only a deleted identity can block a create.
-            planner.relocate(blocker);
-        }
-        planner.result.operations.push(Operation::Create(label));
-    }
-    for id in &planner.deleting {
-        planner.result.operations.push(Operation::Delete {
-            name: planner.current[id].name.clone(),
-        });
-    }
+    let mut planner = Planner::new(document)?;
+    planner.plan_entries(document)?;
+    planner.append_deletes();
     Ok(planner.result)
 }
 
