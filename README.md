@@ -1,6 +1,6 @@
 # labeldeck
 
-Export, edit, compare, and synchronize GitHub repository labels from a JSON file.
+Export, edit, compare, copy, and synchronize GitHub repository labels.
 `labeldeck` runs on Linux, macOS, and Windows as a standalone CLI.
 
 ## Updating labels safely
@@ -47,6 +47,8 @@ Use `labeldeck --help` or `labeldeck COMMAND --help` for all options.
 Specify repositories as `OWNER/REPO`, not URLs.
 
 ### `export`
+
+`export` writes deterministic, name-sorted JSON suitable for version control and code review.
 
 Export writes to `./labels.json` by default. Choose another destination with
 `--file PATH`, or save a [global default deck](#the-global-default-deck) with `--global`:
@@ -314,6 +316,8 @@ Published targets:
 | `aarch64-pc-windows-msvc` | `.zip` |
 
 Linux GNU builds require glibc 2.28 or newer. On older systems, the installer selects the static musl build.
+
+The installer verifies the checksum and validates the downloaded binary before replacing an existing installation.
 
 #### Unix installer (Linux/macOS)
 
