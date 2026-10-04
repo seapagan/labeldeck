@@ -136,10 +136,7 @@ fn tab_cursor_and_field_switching_commit_colour_and_description() {
     let mut ui = state(false);
     key(&mut ui, KeyCode::Enter);
     key(&mut ui, KeyCode::Tab);
-    for _ in 0..6 {
-        key(&mut ui, KeyCode::Backspace);
-    }
-    ui.handle(Event::Paste("abcdef".into()));
+    super::form::replace(&mut ui, "abcdef");
     key(&mut ui, KeyCode::Tab);
     ui.handle(Event::Paste("description".into()));
     key(&mut ui, KeyCode::Left);

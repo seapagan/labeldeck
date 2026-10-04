@@ -15,6 +15,7 @@ use ratatui::{
     backend::TestBackend,
     buffer::Buffer,
     style::{Color, Modifier},
+    text::Line,
 };
 
 fn form_state(level: ColorLevel) -> UiState {
@@ -104,6 +105,18 @@ fn color_focus_is_six_cells_with_unscrolled_text_and_bounded_cursor() {
                 terminal.get_cursor_position().unwrap().x,
                 x + text.len().min(5) as u16
             );
+            for _ in 0..5 {
+                key(&mut ui, KeyCode::Right);
+            }
+            if !text.is_empty() {
+                key(&mut ui, KeyCode::Left);
+                terminal.draw(|f| ui.render(f)).unwrap();
+                assert_eq!(
+                    terminal.get_cursor_position().unwrap().x,
+                    x + text.len().min(5) as u16 - 1
+                );
+                assert_color_cells(terminal.backend().buffer(), x, y, level);
+            }
             key(&mut ui, KeyCode::Home);
             for offset in 0..=text.len() {
                 terminal.draw(|f| ui.render(f)).unwrap();
@@ -114,6 +127,109 @@ fn color_focus_is_six_cells_with_unscrolled_text_and_bounded_cursor() {
                 key(&mut ui, KeyCode::Right);
             }
         }
+    }
+}
+
+#[test]
+fn text_field_focus_uses_display_width_plus_one_and_clamps_to_available_cells()
+{
+    for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
+        for width in [48, 80, 140] {
+            for field in [0, 2] {
+                for (text, display_width) in [
+                    ("", 0),
+                    ("a", 1),
+                    ("normal", 6),
+                    ("é", 1),
+                    ("界", 2),
+                    ("e\u{301}", 1),
+                ] {
+                    assert_text_width(
+                        level,
+                        width,
+                        field,
+                        text,
+                        display_width,
+                    );
+                }
+                assert_text_width(level, width, field, &"界".repeat(30), 60);
+            }
+        }
+    }
+}
+
+fn assert_text_width(
+    level: ColorLevel,
+    width: u16,
+    field: usize,
+    text: &str,
+    display_width: u16,
+) {
+    let mut ui = form_state(level);
+    key(&mut ui, KeyCode::Enter);
+    for _ in 0..field {
+        key(&mut ui, KeyCode::Tab);
+    }
+    replace(&mut ui, text);
+    let mut terminal = Terminal::new(TestBackend::new(width, 16)).unwrap();
+    terminal.draw(|f| ui.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let (label_x, y) = locate(buffer, ["Name", "Color", "Description"][field]);
+    let x = label_x + 17;
+    let highlighted: Vec<_> = (0..width)
+        .filter(|&i| {
+            let cell = &buffer[(i, y)];
+            if level == ColorLevel::NoColor {
+                cell.modifier.contains(Modifier::REVERSED)
+            } else {
+                cell.bg == Color::DarkGray
+            }
+        })
+        // Wide glyphs occupy their continuation cells with the same style;
+        // Ratatui resets those hidden cells in its test buffer.
+        .flat_map(|i| i..i + Line::raw(buffer[(i, y)].symbol()).width() as u16)
+        .collect();
+    let expected = (display_width + 1).min(width - x);
+    assert_eq!(highlighted, (x..x + expected).collect::<Vec<_>>());
+    let cursor = terminal.get_cursor_position().unwrap();
+    assert!(cursor.x >= x && cursor.x < x + expected);
+    if display_width < width - x {
+        assert_eq!(cursor.x, x + display_width);
+    }
+}
+
+#[test]
+fn text_field_end_right_is_a_noop_and_first_left_is_visible() {
+    for field in [0, 2] {
+        let mut ui = form_state(ColorLevel::TrueColor);
+        key(&mut ui, KeyCode::Enter);
+        for _ in 0..field {
+            key(&mut ui, KeyCode::Tab);
+        }
+        replace(&mut ui, "abc");
+        let mut terminal = Terminal::new(TestBackend::new(48, 16)).unwrap();
+        terminal.draw(|f| ui.render(f)).unwrap();
+        let end = terminal.get_cursor_position().unwrap();
+        for _ in 0..5 {
+            key(&mut ui, KeyCode::Right);
+            terminal.draw(|f| ui.render(f)).unwrap();
+            assert_eq!(terminal.get_cursor_position().unwrap(), end);
+        }
+        key(&mut ui, KeyCode::Left);
+        terminal.draw(|f| ui.render(f)).unwrap();
+        assert_eq!(terminal.get_cursor_position().unwrap().x, end.x - 1);
+        key(&mut ui, KeyCode::Delete);
+        key(&mut ui, KeyCode::Char('d'));
+        key(&mut ui, KeyCode::Enter);
+        let item = &ui.document().labels().unwrap()[0];
+        assert_eq!(
+            if field == 0 {
+                &item.name
+            } else {
+                &item.description
+            },
+            "abd"
+        );
     }
 }
 

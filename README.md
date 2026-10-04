@@ -142,8 +142,12 @@ value beside a continuous left border; labels and values keep their positions
 when editing begins. Under `NO_COLOR`, bold and reverse styling mark the
 focused value, including when it is empty.
 All three values share a column, with a separate swatch gutter to the left.
-The Color focus area is exactly six cells wide. Form messages appear below
-Description after a blank row; their reserved row keeps the controls stable.
+The Color focus area is exactly six cells wide.
+Name and Description highlight their display width plus one cursor cell.
+For a complete Color, the cursor rests on the last digit; Right there is a
+no-op, Left moves immediately, and Delete removes that digit.
+Form messages appear below Description after a blank row; their reserved row
+keeps the controls stable.
 Deleting a label selects the next visible label at the same list position,
 or the previous label when deleting the last row, including under a filter.
 Colour previews use a small `■` swatch and update as soon as a draft is valid;

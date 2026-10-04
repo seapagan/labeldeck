@@ -10,6 +10,9 @@ const LABEL_WIDTH: u16 = 15;
 const SWATCH_WIDTH: u16 = 2;
 const VALUE_OFFSET: u16 = LABEL_WIDTH + SWATCH_WIDTH;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) struct EditForm {
     pub id: Option<EntryId>,
     pub field: Field,
@@ -18,12 +21,14 @@ pub(super) struct EditForm {
 
 impl EditForm {
     pub fn new(id: Option<EntryId>, draft: Draft) -> Self {
-        Self {
+        let mut form = Self {
             id,
             field: Field::Name,
             inputs: [draft.name, draft.color, draft.description]
                 .map(Input::new),
-        }
+        };
+        form.clamp_color_cursor();
+        form
     }
 
     pub fn input(&mut self) -> &mut Input {
@@ -31,10 +36,17 @@ impl EditForm {
     }
 
     pub fn handle(&mut self, request: InputRequest) -> Result<(), String> {
+        if matches!(request, InputRequest::GoToNextChar)
+            && self.field == Field::Color
+            && self.input().cursor() == LABEL_COLOR_LEN - 1
+        {
+            return Ok(());
+        }
         if let InputRequest::InsertChar(ch) = request {
             self.insert(&ch.to_string())
         } else {
             self.input().handle(request);
+            self.clamp_color_cursor();
             Ok(())
         }
     }
@@ -84,7 +96,15 @@ impl EditForm {
         for ch in text.chars() {
             self.input().handle(InputRequest::InsertChar(ch));
         }
+        self.clamp_color_cursor();
         Ok(())
+    }
+
+    fn clamp_color_cursor(&mut self) {
+        let input = &mut self.inputs[Field::Color as usize];
+        if input.cursor() >= LABEL_COLOR_LEN {
+            input.handle(InputRequest::SetCursor(LABEL_COLOR_LEN - 1));
+        }
     }
 
     pub fn draft(&self) -> Draft {
@@ -159,7 +179,6 @@ impl super::UiState {
                 Line::raw(super::render::clean(value))
                     .width()
                     .saturating_add(1)
-                    .max(12)
             } else {
                 usize::from(area.right().saturating_sub(x + VALUE_OFFSET))
             };
@@ -219,7 +238,7 @@ impl super::UiState {
         let width = area.right().saturating_sub(x);
         let scroll = form.map_or(0, |f| {
             if field == Field::Color {
-                // All six digits fit; clamp the end cursor to the final cell.
+                // All six digits fit, and the logical cursor stays inside them.
                 0
             } else {
                 f.inputs[index].visual_scroll(width.saturating_sub(1) as usize)
