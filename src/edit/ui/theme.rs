@@ -11,6 +11,7 @@ pub(super) enum Role {
     DetailValue,
     Field,
     FocusedField,
+    EditAccent,
     Filter,
     Help,
     KeyHint,
@@ -45,7 +46,9 @@ impl UiTheme {
         if self.colour {
             style = match role {
                 Title | Header | DetailLabel | Filter | KeyHint | Undo
-                | Redo | ModalBorder | ModalTitle => style.fg(Color::Cyan),
+                | Redo | ModalBorder | ModalTitle | EditAccent => {
+                    style.fg(Color::Cyan)
+                }
                 Apply => style.fg(Color::Green),
                 Cancel | Warning => style.fg(Color::Yellow),
                 Error => style.fg(Color::Red),
@@ -62,9 +65,6 @@ impl UiTheme {
             Help | Disabled => style.add_modifier(Modifier::DIM),
             _ => style,
         };
-        if matches!(role, Field | FocusedField) {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
         if self.dimmed {
             style = style
                 .bg(Color::Reset)

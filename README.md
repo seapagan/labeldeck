@@ -131,12 +131,15 @@ A new committed edit after Undo clears Redo.
 | Esc in the form | Cancel the entire edit, including a pending new label |
 | Enter / Esc in the filter | Accept the filter / restore the previous filter |
 | Ctrl-Z / Ctrl-Y | Undo / Redo; discard uncommitted form input first |
-| Tab/Shift-Tab at list level | Focus the compact footer buttons |
+| Tab/Shift-Tab at list level | Cycle the compact footer buttons |
 | Ctrl-S / Apply | Open confirmation when semantic changes exist |
 | `q` or Esc at list level, Ctrl-C anywhere | Cancel |
 
 Buttons, list rows, and form fields support mouse clicks; the mouse wheel
-navigates labels. Colour previews update as soon as a draft is valid;
+navigates labels. The footer groups Undo, Redo, Apply, and Cancel on the left
+and shows their shortcuts directly. The form marks its focused field with a
+local highlight and a selection marker, beside a continuous left border.
+Colour previews use a small `■` swatch and update as soon as a draft is valid;
 incomplete colours are allowed while typing and validated when saving the form.
 Confirmation defaults to Back. Left/Right or Tab/Shift-Tab selects Apply/Back,
 Enter activates the choice, and Esc returns to the editor.

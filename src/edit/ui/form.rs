@@ -58,7 +58,7 @@ impl super::UiState {
         theme: &super::theme::UiTheme,
     ) {
         use super::{Mode, theme::Role};
-        use ratatui::{layout::Rect, widgets::Paragraph};
+        use ratatui::{layout::Rect, text::Line, widgets::Paragraph};
         let (draft, form) = if let Mode::Edit(form) = &self.mode {
             (form.draft(), Some(form))
         } else if let Some(entry) = self
@@ -71,11 +71,13 @@ impl super::UiState {
         } else {
             return;
         };
-        frame.render_widget(
-            Paragraph::new("─".repeat(usize::from(area.width)))
-                .style(theme.style(Role::Separator)),
-            Rect::new(area.x, area.y, area.width, 1),
-        );
+        if form.is_none() {
+            frame.render_widget(
+                Paragraph::new("─".repeat(usize::from(area.width)))
+                    .style(theme.style(Role::Separator)),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+        }
         for (index, (field, value)) in [
             (Field::Name, &draft.name),
             (Field::Color, &draft.color),
@@ -85,7 +87,25 @@ impl super::UiState {
         .enumerate()
         {
             let y = area.y + 1 + index as u16;
-            self.fields[index] = Rect::new(area.x, y, area.width, 1);
+            let x = area.x + if form.is_some() { 2 } else { 0 };
+            let prefix = 15 + if field == Field::Color { 2 } else { 0 };
+            let width = if form.is_some() {
+                (prefix
+                    + Line::raw(super::render::clean(value))
+                        .width()
+                        .saturating_add(1)
+                        .max(12))
+                .min(usize::from(area.right() - x)) as u16
+            } else {
+                area.right() - x
+            };
+            self.fields[index] = Rect::new(x, y, width, 1);
+            if form.is_some() {
+                frame.render_widget(
+                    Paragraph::new("│").style(theme.style(Role::EditAccent)),
+                    Rect::new(area.x, y, 1, 1),
+                );
+            }
             self.render_field(
                 frame,
                 self.fields[index],
@@ -117,6 +137,7 @@ impl super::UiState {
         } else {
             Role::DetailValue
         };
+        frame.render_widget(Paragraph::new("").style(theme.style(role)), area);
         frame.render_widget(
             Paragraph::new(format!(
                 "{} {:<13}",
@@ -134,9 +155,9 @@ impl super::UiState {
         if field == Field::Color {
             frame.render_widget(
                 Paragraph::new(self.swatch(value, theme)),
-                Rect::new(x, y, 3, 1),
+                Rect::new(x, y, 2, 1),
             );
-            x += 3;
+            x += 2;
         }
         let width = area.right().saturating_sub(x);
         let scroll = form.map_or(0, |f| {

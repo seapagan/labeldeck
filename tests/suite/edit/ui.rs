@@ -225,7 +225,7 @@ fn mouse_buttons_rows_and_wheel_use_rendered_hit_areas() {
     ui.handle(mouse(MouseEventKind::ScrollDown, 2, 3));
     assert_eq!(ui.selected(), Some(1));
     assert!(matches!(
-        ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 70, 23)),
+        ui.handle(mouse(MouseEventKind::Down(MouseButton::Left), 34, 23)),
         Some(UiAction::Cancel)
     ));
 }
@@ -275,15 +275,15 @@ fn clickable_history_and_confirmation_buttons_follow_current_layout() {
     let mut ui = state(false);
     key(&mut ui, KeyCode::Delete);
     let buffer = draw(&mut ui, 80, 24);
-    let undo = locate(&buffer, "[ Undo ]");
+    let undo = locate(&buffer, "[^Z Undo]");
     click(&mut ui, undo.0, undo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 2);
     let buffer = draw(&mut ui, 80, 24);
-    let redo = locate(&buffer, "[ Redo ]");
+    let redo = locate(&buffer, "[^Y Redo]");
     click(&mut ui, redo.0, redo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 1);
     let buffer = draw(&mut ui, 80, 24);
-    let apply = locate(&buffer, "[ Apply ]");
+    let apply = locate(&buffer, "[^S Apply]");
     click(&mut ui, apply.0, apply.1);
     let buffer = draw(&mut ui, 80, 24);
     let back = locate(&buffer, "[ Back ]");
@@ -386,9 +386,9 @@ fn swatches_use_colour_only_when_capability_allows() {
             .buffer()
             .content()
             .iter()
-            .filter(|c| c.symbol() == "█")
+            .filter(|c| c.symbol() == "■")
             .collect();
-        assert_eq!(cells.len(), 4);
+        assert_eq!(cells.len(), 2);
         assert_eq!(
             cells[0].fg == ratatui::style::Color::Reset,
             level == ColorLevel::NoColor

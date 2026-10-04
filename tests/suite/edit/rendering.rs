@@ -82,8 +82,8 @@ fn content_columns_are_bounded_unicode_aware_and_header_aligned() {
                     color_x
                 }
             );
-            assert_eq!(buffer[(x, 3)].symbol(), "█");
-            assert_eq!(buffer[(x + 3, 3)].symbol(), "e");
+            assert_eq!(buffer[(x, 3)].symbol(), "■");
+            assert_eq!(buffer[(x + 2, 3)].symbol(), "e");
             assert_eq!(buffer[(2, 1)].symbol(), "L");
             assert_eq!(
                 buffer[(2, 3)].symbol(),
@@ -130,8 +130,8 @@ fn headers_and_selection_keep_hierarchy_without_inverting_swatches() {
                 .unwrap_or(Color::Reset)
         );
         assert!(!swatch.modifier.contains(Modifier::REVERSED));
-        assert!(row(&buffer, 3).contains("██ ededed"));
-        assert!(row(&buffer, 6).contains("██ ededed"));
+        assert!(row(&buffer, 3).contains("■ ededed"));
+        assert!(row(&buffer, 6).contains("■ ededed"));
         if level == ColorLevel::NoColor {
             assert!(buffer.content().iter().all(|cell| cell.fg
                 == Color::Reset
@@ -154,9 +154,9 @@ fn live_preview_uses_draft_only_and_invalid_colour_has_neutral_placeholder() {
         replace(&mut ui, "ff0000");
         let buffer = draw(&mut ui, 80, 24);
         let (x, y) = locate(&buffer, "ff0000");
-        assert_eq!(buffer[(x - 3, y)].symbol(), "█");
+        assert_eq!(buffer[(x - 2, y)].symbol(), "■");
         assert_eq!(
-            buffer[(x - 3, y)].fg,
+            buffer[(x - 2, y)].fg,
             if level == ColorLevel::NoColor {
                 Color::Reset
             } else {
@@ -166,7 +166,7 @@ fn live_preview_uses_draft_only_and_invalid_colour_has_neutral_placeholder() {
         replace(&mut ui, "ff0");
         let buffer = draw(&mut ui, 80, 24);
         let (x, y) = locate(&buffer, "ff0");
-        assert_eq!(buffer[(x - 3, y)].fg, Color::Reset);
+        assert_eq!(buffer[(x - 2, y)].fg, Color::Reset);
         assert_eq!(
             ui.document().labels().unwrap()[0].color.as_str(),
             "ededed"
@@ -182,24 +182,27 @@ fn compact_footer_controls_have_matching_hitboxes_and_disabled_styles() {
     let mut ui = state(false);
     key(&mut ui, KeyCode::Tab);
     let buffer = draw(&mut ui, 120, 24);
-    assert!(row(&buffer, 23).starts_with("[ Undo ] [ Redo ]"));
-    assert!(row(&buffer, 23).ends_with("[ Apply ] [ Cancel ]"));
-    for text in ["[ Undo ]", "[ Redo ]", "[ Apply ]"] {
+    assert!(
+        row(&buffer, 23)
+            .starts_with("[^Z Undo]  [^Y Redo]  [^S Apply]  [Esc Cancel]")
+    );
+    assert!(row(&buffer, 23)[46..].trim().is_empty());
+    for text in ["[^Z Undo]", "[^Y Redo]", "[^S Apply]"] {
         let pos = locate(&buffer, text);
         assert!(buffer[pos].modifier.contains(Modifier::DIM));
     }
-    assert!(click(&mut ui, 40, 23).is_none());
+    assert!(click(&mut ui, 60, 23).is_none());
     assert!(!ui.document().can_undo());
     key(&mut ui, KeyCode::Delete);
     let buffer = draw(&mut ui, 120, 24);
-    let undo = locate(&buffer, "[ Undo ]");
+    let undo = locate(&buffer, "[^Z Undo]");
     click(&mut ui, undo.0, undo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 2);
     let buffer = draw(&mut ui, 120, 24);
-    let redo = locate(&buffer, "[ Redo ]");
+    let redo = locate(&buffer, "[^Y Redo]");
     click(&mut ui, redo.0, redo.1);
     assert_eq!(ui.document().labels().unwrap().len(), 1);
-    assert!(matches!(click(&mut ui, 119, 23), Some(UiAction::Cancel)));
+    assert!(matches!(click(&mut ui, 34, 23), Some(UiAction::Cancel)));
 }
 
 #[test]
@@ -214,7 +217,7 @@ fn footer_focus_background_is_confined_to_compact_button() {
     key(&mut ui, KeyCode::Tab);
     let buffer = draw(&mut ui, 140, 24);
     assert_ne!(buffer[(0, 23)].bg, Color::Reset);
-    assert_eq!(buffer[(8, 23)].bg, Color::Reset);
+    assert_eq!(buffer[(9, 23)].bg, Color::Reset);
     assert!(
         buffer
             .content()
@@ -231,7 +234,7 @@ fn short_and_filtered_decks_keep_details_close_and_bottom_controls_stable() {
     for height in [16, 24, 40] {
         let buffer = draw(&mut ui, 80, height);
         assert_eq!(locate(&buffer, "Name").1, 6);
-        assert_eq!(locate(&buffer, "[ Undo ]").1, height - 1);
+        assert_eq!(locate(&buffer, "[^Z Undo]").1, height - 1);
     }
     key(&mut ui, KeyCode::Char('/'));
     ui.handle(Event::Paste("bug".into()));
@@ -266,7 +269,7 @@ fn no_changes_never_opens_modal_from_keyboard_or_mouse() {
     for mouse in [false, true] {
         let buffer = draw(&mut ui, 80, 24);
         if mouse {
-            let p = locate(&buffer, "[ Apply ]");
+            let p = locate(&buffer, "[^S Apply]");
             click(&mut ui, p.0, p.1);
         } else {
             ctrl(&mut ui, 's');
@@ -289,7 +292,7 @@ fn identity_swap_with_same_final_label_set_keeps_apply_disabled() {
     key(&mut ui, KeyCode::Enter);
     let buffer = draw(&mut ui, 80, 24);
     assert!(
-        buffer[locate(&buffer, "[ Apply ]")]
+        buffer[locate(&buffer, "[^S Apply]")]
             .modifier
             .contains(Modifier::DIM)
     );

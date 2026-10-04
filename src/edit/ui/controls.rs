@@ -5,6 +5,7 @@ use super::{
 use ratatui::{
     Frame,
     layout::{HorizontalAlignment, Rect},
+    text::{Line, Span},
     widgets::Paragraph,
 };
 
@@ -15,38 +16,40 @@ impl UiState {
         area: Rect,
         theme: &UiTheme,
     ) {
-        let rectangles = [
-            Rect::new(area.x, area.y, 8, 1),
-            Rect::new(area.x + 9, area.y, 8, 1),
-            Rect::new(area.right() - 20, area.y, 9, 1),
-            Rect::new(area.right() - 10, area.y, 10, 1),
-        ];
         let enabled = [
             self.document.can_undo(),
             self.document.can_redo(),
             self.dirty(),
             true,
         ];
-        for (i, (name, role)) in [
-            ("Undo", Role::Undo),
-            ("Redo", Role::Redo),
-            ("Apply", Role::Apply),
-            ("Cancel", Role::Cancel),
+        let mut x = area.x;
+        for (i, (hotkey, name, role)) in [
+            ("^Z", "Undo", Role::Undo),
+            ("^Y", "Redo", Role::Redo),
+            ("^S", "Apply", Role::Apply),
+            ("Esc", "Cancel", Role::Cancel),
         ]
         .into_iter()
         .enumerate()
         {
+            let focused = self.button == Some(i);
+            let line = Line::from(vec![
+                Span::raw("["),
+                Span::styled(
+                    hotkey,
+                    theme.button(Role::KeyHint, enabled[i], focused),
+                ),
+                Span::raw(format!(" {name}]")),
+            ]);
+            let rect = Rect::new(x, area.y, line.width() as u16, 1);
             frame.render_widget(
-                Paragraph::new(format!("[ {name} ]"))
+                Paragraph::new(line)
                     .alignment(HorizontalAlignment::Center)
-                    .style(theme.button(
-                        role,
-                        enabled[i],
-                        self.button == Some(i),
-                    )),
-                rectangles[i],
+                    .style(theme.button(role, enabled[i], focused)),
+                rect,
             );
+            self.buttons.push(rect);
+            x = rect.right() + 2;
         }
-        self.buttons = rectangles.into();
     }
 }

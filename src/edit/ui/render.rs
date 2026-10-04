@@ -35,7 +35,7 @@ impl UiState {
         if let Some(color) = preview(hex, self.level) {
             style = style.fg(color);
         }
-        Span::styled(if valid { "██ " } else { "░░ " }, style)
+        Span::styled(if valid { "■ " } else { "· " }, style)
     }
 
     pub fn render(&mut self, frame: &mut Frame) {
@@ -241,9 +241,7 @@ impl UiState {
                     ("n", "new"),
                     ("Del", "delete"),
                     ("/", "filter"),
-                    ("Ctrl-S", "apply"),
-                    ("Ctrl-Z/Y", "undo/redo"),
-                    ("Tab", "buttons"),
+                    ("Tab", "cycle buttons"),
                 ],
             }
         };
