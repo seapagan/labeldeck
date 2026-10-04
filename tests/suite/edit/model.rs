@@ -172,16 +172,19 @@ fn unknown_entries_cannot_be_committed_or_deleted() {
 }
 
 #[test]
-fn filtering_matches_name_description_case_and_empty() {
+fn filtering_matches_only_names_case_insensitively() {
     let mut doc = document();
     let mut draft = doc.entries()[0].draft.clone();
     draft.description = "Documentation Éclair".into();
     doc.commit(doc.entries()[0].id, draft.clone()).unwrap();
-    for query in ["BUG", "DOC", "éCLAIR", ""] {
+    for query in ["BUG", "ug", ""] {
         assert!(matches_filter(&draft, query));
         assert_eq!(visible_ids(&doc, query), vec![doc.entries()[0].id]);
     }
-    assert!(visible_ids(&doc, "missing").is_empty());
+    for query in ["DOC", "éCLAIR", "missing"] {
+        assert!(!matches_filter(&draft, query));
+        assert!(visible_ids(&doc, query).is_empty());
+    }
     doc.delete(doc.entries()[0].id);
     assert!(visible_ids(&doc, "").is_empty());
 }

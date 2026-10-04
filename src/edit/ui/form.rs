@@ -5,6 +5,11 @@ use crate::{
 };
 use tui_input::{Input, InputRequest};
 
+pub(super) const DETAIL_HEIGHT: u16 = 6;
+const LABEL_WIDTH: u16 = 15;
+const SWATCH_WIDTH: u16 = 2;
+const VALUE_OFFSET: u16 = LABEL_WIDTH + SWATCH_WIDTH;
+
 pub(super) struct EditForm {
     pub id: Option<EntryId>,
     pub field: Field,
@@ -148,17 +153,19 @@ impl super::UiState {
         {
             let y = area.y + 1 + index as u16;
             let x = area.x + 2;
-            let prefix = 15 + if field == Field::Color { 2 } else { 0 };
-            let width = if form.is_some() {
-                (prefix
-                    + Line::raw(super::render::clean(value))
-                        .width()
-                        .saturating_add(1)
-                        .max(12))
-                .min(usize::from(area.right() - x)) as u16
+            let value_width = if field == Field::Color {
+                LABEL_COLOR_LEN
+            } else if form.is_some() {
+                Line::raw(super::render::clean(value))
+                    .width()
+                    .saturating_add(1)
+                    .max(12)
             } else {
-                area.right() - x
+                usize::from(area.right().saturating_sub(x + VALUE_OFFSET))
             };
+            let width = (usize::from(VALUE_OFFSET) + value_width)
+                .min(usize::from(area.right().saturating_sub(x)))
+                as u16;
             self.fields[index] = Rect::new(x, y, width, 1);
             if form.is_some() {
                 frame.render_widget(
@@ -200,19 +207,23 @@ impl super::UiState {
         frame.render_widget(
             Paragraph::new(field.title())
                 .style(theme.style(Role::DetailLabel)),
-            Rect::new(area.x, y, 15, 1),
+            Rect::new(area.x, y, LABEL_WIDTH, 1),
         );
-        let mut x = area.x + 15;
+        let x = area.x + VALUE_OFFSET;
         if field == Field::Color {
             frame.render_widget(
                 Paragraph::new(self.swatch(value, theme)),
-                Rect::new(x, y, 2, 1),
+                Rect::new(x - SWATCH_WIDTH, y, SWATCH_WIDTH, 1),
             );
-            x += 2;
         }
         let width = area.right().saturating_sub(x);
         let scroll = form.map_or(0, |f| {
-            f.inputs[index].visual_scroll(width.saturating_sub(1) as usize)
+            if field == Field::Color {
+                // All six digits fit; clamp the end cursor to the final cell.
+                0
+            } else {
+                f.inputs[index].visual_scroll(width.saturating_sub(1) as usize)
+            }
         });
         frame.render_widget(
             Paragraph::new(clean(value))

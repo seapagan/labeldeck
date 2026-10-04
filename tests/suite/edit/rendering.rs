@@ -31,6 +31,10 @@ pub(super) fn row(buffer: &Buffer, y: u16) -> String {
         .collect()
 }
 
+pub(super) fn status(buffer: &Buffer) -> String {
+    row(buffer, locate(buffer, "Description").1 + 2)
+}
+
 pub(super) fn locate(buffer: &Buffer, text: &str) -> (u16, u16) {
     for y in 0..buffer.area.height {
         // All searched controls are ASCII. Count terminal cells, not UTF-8 bytes.
@@ -58,7 +62,7 @@ pub(super) fn click(ui: &mut UiState, x: u16, y: u16) -> Option<UiAction> {
 pub(super) fn assert_focus(ui: &mut UiState, title: &str) {
     let buffer = draw(ui, 160, 24);
     let (x, y) = locate(&buffer, title);
-    let value_x = x + 15 + if title == "Color" { 2 } else { 0 };
+    let value_x = x + 17;
     assert!(buffer[(value_x, y)].modifier.contains(Modifier::BOLD));
     assert_eq!(buffer[(x, y)].bg, Color::Reset);
 }
@@ -261,7 +265,7 @@ fn short_and_filtered_decks_keep_details_close_and_bottom_controls_stable() {
         key(&mut ui, KeyCode::Down);
     }
     let buffer = draw(&mut ui, 48, 16);
-    assert_eq!(locate(&buffer, "Name").1, 9);
+    assert_eq!(locate(&buffer, "Name").1, 8);
     assert!(screen(&mut ui, 48, 16).contains("label-30"));
     click(&mut ui, 2, 3);
     assert!(ui.selected().unwrap() > 0);

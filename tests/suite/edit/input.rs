@@ -1,6 +1,6 @@
 use super::{
     form::replace,
-    rendering::{draw, locate, row},
+    rendering::{draw, locate, row, status},
     ui::{key, state},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -71,7 +71,7 @@ fn colour_rejects_invalid_characters_atomically_without_cursor_or_history_change
             let buffer = draw(&mut ui, 160, 24);
             let (_, y) = locate(&buffer, "Color");
             assert!(row(&buffer, y).contains("· abc"));
-            assert!(row(&buffer, 20).contains("only hexadecimal digits"));
+            assert!(status(&buffer).contains("only hexadecimal digits"));
             assert!(!ui.document().can_undo());
             assert_eq!(
                 ui.document().labels().unwrap()[0].color.as_str(),
@@ -94,7 +94,7 @@ fn colour_seventh_character_and_overlong_paste_preserve_draft() {
         ui.handle(Event::Paste(text.into()));
         assert_eq!(cursor(&mut ui), before);
         let buffer = draw(&mut ui, 160, 24);
-        assert!(row(&buffer, 20).contains("limited to 6 hexadecimal digits"));
+        assert!(status(&buffer).contains("limited to 6 hexadecimal digits"));
         assert!(!ui.document().can_undo());
         key(&mut ui, KeyCode::Enter);
         assert_eq!(
@@ -119,7 +119,7 @@ fn partial_colour_is_safe_but_final_domain_validation_requires_six_digits() {
         assert!(row(&buffer, y).contains(&format!("· {text}")));
         key(&mut ui, KeyCode::Enter);
         let buffer = draw(&mut ui, 160, 24);
-        assert!(row(&buffer, 20).contains("expected 6 hexadecimal digits"));
+        assert!(status(&buffer).contains("expected 6 hexadecimal digits"));
         assert!(row(&buffer, 22).contains("Enter save"));
         assert!(!ui.document().can_undo());
         assert_eq!(
@@ -150,7 +150,7 @@ fn name_and_description_limits_count_unicode_characters_and_reject_whole_inserti
             ui.handle(Event::Paste("too much".into()));
             assert_eq!(cursor(&mut ui), before);
             assert!(!ui.document().can_undo());
-            assert!(row(&draw(&mut ui, 160, 24), 20).contains(&format!(
+            assert!(status(&draw(&mut ui, 160, 24)).contains(&format!(
                 "{title} are limited to {limit} characters."
             )));
             key(&mut ui, KeyCode::Enter);
@@ -205,7 +205,7 @@ fn typing_reaches_unicode_limits_without_counting_utf8_bytes() {
         for _ in 0..limit {
             key(&mut ui, KeyCode::Char('é'));
         }
-        assert!(row(&draw(&mut ui, 160, 24), 20).trim().is_empty());
+        assert!(status(&draw(&mut ui, 160, 24)).trim().is_empty());
         let before = cursor(&mut ui);
         key(&mut ui, KeyCode::Char('é'));
         assert_eq!(cursor(&mut ui), before);
@@ -236,7 +236,7 @@ fn deletion_at_limit_allows_insertion_at_the_same_cursor() {
         key(&mut ui, KeyCode::Char('b'));
         key(&mut ui, KeyCode::Delete);
         key(&mut ui, KeyCode::Char('b'));
-        assert!(row(&draw(&mut ui, 160, 24), 20).trim().is_empty());
+        assert!(status(&draw(&mut ui, 160, 24)).trim().is_empty());
         key(&mut ui, KeyCode::Enter);
         let labels = ui.document().labels().unwrap();
         let value = match field {

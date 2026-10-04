@@ -1,5 +1,6 @@
 use super::{
     Mode, UiState,
+    form::DETAIL_HEIGHT,
     theme::{Role, UiTheme},
 };
 use crate::edit::{color::preview, model::visible_ids, plan};
@@ -9,6 +10,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Cell, HighlightSpacing, Paragraph, Row, Table},
 };
+
+const BOTTOM_CONTROLS_HEIGHT: u16 = 3;
 
 pub(super) fn clean(text: &str) -> String {
     text.chars()
@@ -61,18 +64,22 @@ impl UiState {
             &theme,
         );
         let visible = visible_ids(&self.document, &self.filter);
-        let height = (visible.len().max(1).saturating_add(2))
-            .min(usize::from(area.height - 9)) as u16;
+        let height = (visible.len().max(1).saturating_add(2)).min(usize::from(
+            area.height - 1 - DETAIL_HEIGHT - BOTTOM_CONTROLS_HEIGHT,
+        )) as u16;
         let table_area = Rect::new(area.x, area.y + 1, area.width, height);
         self.render_table(frame, table_area, &theme);
-        self.render_details(
-            frame,
-            Rect::new(area.x, table_area.bottom(), area.width, 4),
-            &theme,
-        );
+        let details =
+            Rect::new(area.x, table_area.bottom(), area.width, DETAIL_HEIGHT);
+        self.render_details(frame, details, &theme);
         frame.render_widget(
             Paragraph::new(clean(&self.error)).style(theme.style(Role::Error)),
-            Rect::new(area.x, area.bottom() - 4, area.width, 1),
+            Rect::new(
+                details.x + 2,
+                details.bottom() - 1,
+                details.width.saturating_sub(2),
+                1,
+            ),
         );
         self.render_filter(
             frame,
@@ -240,7 +247,7 @@ impl UiState {
                     ("Enter", "edit"),
                     ("n", "new"),
                     ("Del", "delete"),
-                    ("/", "filter"),
+                    ("/", "filter labels"),
                     ("Tab", "cycle buttons"),
                 ],
             }
@@ -252,7 +259,7 @@ impl UiState {
                 [
                     Span::styled(*key, theme.style(Role::KeyHint)),
                     Span::styled(
-                        format!(" {action}   "),
+                        format!(" {action}  "),
                         theme.style(Role::Help),
                     ),
                 ]

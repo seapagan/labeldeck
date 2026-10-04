@@ -129,12 +129,7 @@ impl UiState {
                 self.button = None;
                 self.error.clear();
             }
-            KeyCode::Delete => {
-                if let Some(id) = self.selected {
-                    self.document.delete(id);
-                    self.repair_selection();
-                }
-            }
+            KeyCode::Delete => self.delete_selected(),
             KeyCode::Char('/') => {
                 self.button = None;
                 self.mode = Mode::Filter {
@@ -145,6 +140,21 @@ impl UiState {
             _ => {}
         }
         None
+    }
+
+    fn delete_selected(&mut self) {
+        let visible = visible_ids(&self.document, &self.filter);
+        let Some(index) =
+            visible.iter().position(|&id| Some(id) == self.selected)
+        else {
+            return;
+        };
+        if self.document.delete(visible[index]) {
+            let remaining = visible_ids(&self.document, &self.filter);
+            self.selected = remaining
+                .get(index.min(remaining.len().saturating_sub(1)))
+                .copied();
+        }
     }
 
     fn navigate(&mut self, distance: isize) {

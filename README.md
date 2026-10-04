@@ -124,7 +124,7 @@ A new committed edit after Undo clears Redo.
 | Up/Down, PageUp/PageDown | Select a label |
 | Enter or `e` | Open the selected label's Name, Color, and Description form |
 | `n`, Delete | Open a new-label form or mark the selected label for deletion |
-| `/` | Filter by case-insensitive name/description substring |
+| `/` | Filter labels by case-insensitive name substring |
 | Up/Down or Tab/Shift-Tab in the form | Focus another field without saving |
 | Left/Right, Home/End, Backspace/Delete in the form | Move the cursor or edit text |
 | Enter in the form | Validate and save all three fields together |
@@ -141,6 +141,11 @@ and shows their shortcuts directly. The form highlights only its focused
 value beside a continuous left border; labels and values keep their positions
 when editing begins. Under `NO_COLOR`, bold and reverse styling mark the
 focused value, including when it is empty.
+All three values share a column, with a separate swatch gutter to the left.
+The Color focus area is exactly six cells wide. Form messages appear below
+Description after a blank row; their reserved row keeps the controls stable.
+Deleting a label selects the next visible label at the same list position,
+or the previous label when deleting the last row, including under a filter.
 Colour previews use a small `■` swatch and update as soon as a draft is valid;
 incomplete colours are allowed while typing and validated when saving the form.
 Color accepts at most six ASCII hex digits and normalises uppercase letters

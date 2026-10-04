@@ -27,7 +27,7 @@ fn only_editable_values_receive_local_focus_without_underlines_or_markers() {
             let buffer = draw(&mut ui, 100, 24);
             for title in ["Name", "Color", "Description"] {
                 let (x, y) = locate(&buffer, title);
-                let value_x = x + 15 + if title == "Color" { 2 } else { 0 };
+                let value_x = x + 17;
                 for cell in (2..100).map(|x| &buffer[(x, y)]) {
                     assert!(!cell.modifier.contains(Modifier::UNDERLINED));
                 }
@@ -102,8 +102,8 @@ fn edit_accent_is_continuous_with_breathing_room_even_at_minimum_size() {
             );
         } else {
             let (_, focused_y) = locate(&buffer, "Name");
-            assert_eq!(buffer[(17, focused_y)].bg, Color::DarkGray);
-            assert_eq!(buffer[(17, focused_y + 1)].bg, Color::Reset);
+            assert_eq!(buffer[(19, focused_y)].bg, Color::DarkGray);
+            assert_eq!(buffer[(19, focused_y + 1)].bg, Color::Reset);
             assert_eq!(buffer[(47, focused_y)].bg, Color::Reset);
         }
     }

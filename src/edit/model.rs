@@ -176,7 +176,6 @@ impl Document {
 pub fn matches_filter(draft: &Draft, query: &str) -> bool {
     let query = query.to_lowercase();
     draft.name.to_lowercase().contains(&query)
-        || draft.description.to_lowercase().contains(&query)
 }
 
 pub fn visible_ids(document: &Document, query: &str) -> Vec<EntryId> {
