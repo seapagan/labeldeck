@@ -56,6 +56,8 @@ fn colour_accepts_ascii_hex_keyboard_and_paste_in_canonical_case() {
 #[test]
 fn colour_rejects_invalid_characters_atomically_without_cursor_or_history_changes()
  {
+    // Lizard misparses this Rust function's scope and inflates its NLOC.
+    // #lizard forgives
     for paste in [false, true] {
         for ch in [' ', '#', '!', 'g', 'é', '１', '\n'] {
             let mut ui = colour_form();

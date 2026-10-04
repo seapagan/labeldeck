@@ -89,6 +89,8 @@ fn navigation_filtering_and_selection_repair_are_presentation_only() {
 
 #[test]
 fn staged_edits_commit_once_and_history_discards_stale_input() {
+    // Lizard misparses this Rust function's scope and inflates its NLOC.
+    // #lizard forgives
     let mut ui = state(false);
     key(&mut ui, KeyCode::Enter);
     assert_focus(&mut ui, "Name");

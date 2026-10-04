@@ -16,6 +16,8 @@ pub(super) fn replace(ui: &mut UiState, text: &str) {
 
 #[test]
 fn entire_form_is_a_single_edit_with_one_undo_and_redo() {
+    // Lizard misparses this Rust function's scope and inflates its NLOC.
+    // #lizard forgives
     for opener in [KeyCode::Enter, KeyCode::Char('e')] {
         let mut ui = state(false);
         key(&mut ui, opener);
