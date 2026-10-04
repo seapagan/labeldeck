@@ -17,21 +17,22 @@ identical                  → left untouched
 present only on GitHub     → retained by default; deleted only when pruning
 ```
 
-Because updates never rename, a difference that is only a change of name (for example `Bug` → `defect`) cannot be expressed by plain label JSON: it is applied as a create of the new name plus — only if pruning is enabled — a delete of the old one. There is no safe way to infer a rename from a name disappearing and another appearing, so `labeldeck` does not pretend to. Documented limitation, by design.
+Because sync/copy updates never rename, a difference that is only a change of name (for example `Bug` → `defect`) cannot be expressed by plain label JSON: it is applied as a create of the new name plus — only if pruning is enabled — a delete of the old one. There is no safe way to infer a rename from a name disappearing and another appearing, so `labeldeck` does not pretend to. Documented limitation, by design.
 
 > **Pruning warning.** With pruning enabled, a label that exists on GitHub but not in your canonical file is **deleted**. Deleting a label removes it from existing issues and pull requests. Keep pruning off (the default) unless you accept that consequence — and preview with `--dry-run` or `labeldeck diff` first.
 
 ## Workflow
 
 ```text
-export → edit/review the JSON (in a PR) → diff → sync
+export → labeldeck edit → review the JSON (in a PR) → diff → sync
 ```
 
 ```console
 # Capture the current labels of a repository as the canonical file
 $ labeldeck export seapagan/keyhold
 
-# ...review/edit ./labels.json, commit it, get it code-reviewed...
+# Edit the local deck, then commit it and get it code-reviewed
+$ labeldeck edit
 
 # Preview what a sync would do (no changes, diff-style exit codes)
 $ labeldeck diff seapagan/lsplus
@@ -61,6 +62,7 @@ $ labeldeck diff seapagan/lsplus --file other.json
 ## CLI surface
 
 ```text
+labeldeck [--no-proxy] edit [OWNER/REPO | --global | --file PATH]
 labeldeck [--no-proxy] export OWNER/REPO [--file PATH | --global] [--force]
 labeldeck [--no-proxy] diff OWNER/REPO [--file PATH] [--prune | --no-prune]
 labeldeck [--no-proxy] sync OWNER/REPO [--file PATH] [--prune | --no-prune] [--dry-run]
@@ -72,7 +74,7 @@ labeldeck auth status
 
 All repository commands take `OWNER/REPO` arguments (`copy` takes two:
 `SOURCE` then `TARGET`; URLs are not accepted).
-Reads resolve the canonical deck as `--file PATH` → `./labels.json` →
+`diff` and `sync` resolve the canonical deck as `--file PATH` → `./labels.json` →
 `<config dir>/labels.json` (the global default deck). The `--no-proxy`
 flag (usable anywhere) bypasses any configured HTTP proxy for that
 invocation; by default the normal proxy environment
@@ -95,6 +97,61 @@ UNCHANGED feature
 ```
 
 `DELETE` appears only where the effective prune setting would actually remove the label; otherwise the extra label is shown as `RETAIN`.
+
+### `edit`
+
+`labeldeck edit` opens **only `./labels.json`**, with no global fallback.
+`labeldeck edit --global` opens only the actual global deck, even if a local
+one exists. `labeldeck edit --file PATH` edits exactly that existing canonical
+file. Missing or invalid decks fail with guidance; edit never creates a missing
+deck. `--file -` is invalid. These selectors and `OWNER/REPO` are mutually exclusive.
+
+`labeldeck edit OWNER/REPO` fetches live labels using write credentials before
+opening the editor. It uses the same token precedence and first-use login as
+sync; `--no-proxy` applies. Input and output must be interactive terminals.
+
+Edits remain in memory. **Cancel** discards them; **Apply** validates the final
+set and opens a confirmation summary. Confirming restores the terminal before
+writing the deck or issuing paced GitHub mutations, with progress on stderr.
+Undo/Redo operate on committed edits, additions, and deletions, not keystrokes
+or filter changes. A new edit after Undo clears Redo.
+
+| Keys | Action |
+| --- | --- |
+| Up/Down, PageUp/PageDown | Select a label |
+| Enter or `e` | Edit the selected label |
+| `n`, Delete | Add or mark a label for deletion |
+| `/` | Filter by case-insensitive name/description substring |
+| Tab/Shift-Tab | Move between fields, or focus buttons at list level |
+| Enter in a field | Validate and commit the buffered field |
+| Esc in a field/filter | Discard the buffer or restore the previous filter |
+| Ctrl-Z / Ctrl-Y | Undo / Redo; discard uncommitted field input first |
+| Ctrl-S | Open Apply confirmation |
+| `q` or Esc at list level, Ctrl-C anywhere | Cancel |
+
+Buttons and list rows support mouse clicks; the mouse wheel navigates labels.
+Confirmation defaults to Back. Tab/arrow keys select Apply, then Enter confirms.
+Colour swatches respect terminal capabilities through colored_text and
+`NO_COLOR`; hex values remain visible and stored colours are unchanged.
+
+Live renames update labels in place, preserving issue/PR associations. Rename
+chains and cycles use collision-safe ordering and temporary names where needed.
+**Deleting a live label removes it from existing issues and pull requests.**
+Deletes run last, after all non-destructive operations succeed. Final names
+must be unique ignoring case; temporary duplicates while staging a swap are
+allowed, but cannot be applied.
+
+Apply refuses a file whose bytes changed while the editor was open. Live Apply
+refetches labels and refuses any semantic baseline change, ignoring API list
+order. It never silently merges concurrent edits. These guards are optimistic;
+a race after the final check is still possible. GitHub operations are not
+transactional: on failure, exit code 2 and applied/failed/skipped diagnostics
+identify the actual names, including surviving temporary names. Applied
+operations remain in effect; no rollback is attempted.
+
+No-op Apply leaves files byte-for-byte unchanged and issues no mutation
+requests. File editing does not teach sync/copy to infer renames; use live edit
+when preserving an existing label's identity across a rename matters.
 
 ### `sync`
 

@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -32,6 +33,21 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Interactively edit an exact deck or a repository's live labels
+    #[command(
+        after_help = "Bare edit opens only ./labels.json, never the global deck. --global opens only the global deck; --file PATH opens exactly that existing file. OWNER/REPO edits live labels and requires write authentication. Input and output must be interactive terminals. Nothing is saved until Apply and its confirmation; Cancel discards all edits. Renames preserve issue/PR label associations; live deletions remove them. External changes detected before Apply are refused. Ctrl-Z/Ctrl-Y undo/redo; Ctrl-S opens Apply; Tab selects buttons; Esc cancels a field or exits. Colour previews respect terminal capability and NO_COLOR."
+    )]
+    Edit {
+        /// Repository to edit live, as OWNER/REPO; omit for a local deck.
+        #[arg(conflicts_with_all = ["global", "file"])]
+        repo: Option<String>,
+        /// Edit this exact existing deck; '-' is invalid.
+        #[arg(long, value_name = "PATH", value_parser = clap::builder::OsStringValueParser::new().try_map(edit_file_path))]
+        file: Option<PathBuf>,
+        /// Edit only the deck in the labeldeck configuration directory.
+        #[arg(long, conflicts_with = "file")]
+        global: bool,
+    },
     /// Export a repository's labels as a canonical JSON file
     #[command(
         after_help = "Writes to ./labels.json by default; --global writes \
@@ -162,6 +178,14 @@ pub const DEFAULT_LABELS_FILE: &str = "labels.json";
 
 /// `--file -` selects standard output for `export`.
 pub const STDOUT_FILE: &str = "-";
+
+fn edit_file_path(value: std::ffi::OsString) -> Result<PathBuf, String> {
+    if value == STDOUT_FILE {
+        Err("--file - is invalid for edit; use an existing deck path".into())
+    } else {
+        Ok(PathBuf::from(value))
+    }
+}
 
 /// The effective CLI prune override: `Some(true)` for `--prune`,
 /// `Some(false)` for `--no-prune`, `None` when neither flag was passed.

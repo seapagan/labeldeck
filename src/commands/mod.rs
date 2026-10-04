@@ -4,6 +4,7 @@ mod apply;
 pub mod auth;
 pub mod copy;
 pub mod diff;
+pub mod edit;
 pub mod export;
 pub mod sync;
 

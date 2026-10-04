@@ -40,6 +40,7 @@ same gates on Linux, macOS, and Windows.
 
 - `src/labels.rs`, `src/canonical.rs` — label model and canonical JSON
 - `src/plan.rs`, `src/sync.rs` — planning and safe execution
+- `src/edit/` — document/history, rename planning, paced execution, colour adapter, and testable TUI
 - `src/github.rs` — direct GitHub REST client (ureq + rustls)
 - `src/config.rs`, `src/auth.rs` — configuration and token handling
 - `src/cli.rs`, `src/commands/` — clap interface and command UX
