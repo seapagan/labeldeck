@@ -24,13 +24,25 @@ fn check(initial: &[&str], final_names: &[Option<&str>]) -> Vec<Operation> {
         }
     }
     let plan = plan(&doc).unwrap();
+    let current = apply_operations(initial, &plan.operations);
+    for (id, name) in current.values() {
+        assert_eq!(Some(name.as_str()), final_names[*id]);
+    }
+    assert_eq!(current.len(), final_names.iter().flatten().count());
+    plan.operations
+}
+
+fn apply_operations(
+    initial: &[&str],
+    operations: &[Operation],
+) -> BTreeMap<String, (usize, String)> {
     let mut current: BTreeMap<String, (usize, String)> = initial
         .iter()
         .enumerate()
         .map(|(i, n)| (n.to_lowercase(), (i, n.to_string())))
         .collect();
     let mut deleting = false;
-    for op in &plan.operations {
+    for op in operations {
         match op {
             Operation::Rename {
                 current_name,
@@ -59,11 +71,7 @@ fn check(initial: &[&str], final_names: &[Option<&str>]) -> Vec<Operation> {
             _ => panic!("unexpected operation {op:?}"),
         }
     }
-    for (id, name) in current.values() {
-        assert_eq!(Some(name.as_str()), final_names[*id]);
-    }
-    assert_eq!(current.len(), final_names.iter().flatten().count());
-    plan.operations
+    current
 }
 
 #[test]

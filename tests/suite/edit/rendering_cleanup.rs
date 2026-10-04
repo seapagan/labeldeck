@@ -30,6 +30,49 @@ fn title_has_one_blank_row_before_table_headers_with_matching_mouse_rows() {
     }
 }
 
+fn assert_field_focus(
+    buffer: &ratatui::buffer::Buffer,
+    title: &str,
+    focused: &str,
+    level: ColorLevel,
+) {
+    let (x, y) = locate(buffer, title);
+    let value_x = x + 17;
+    for cell in (2..100).map(|x| &buffer[(x, y)]) {
+        assert!(!cell.modifier.contains(Modifier::UNDERLINED));
+    }
+    assert_eq!(
+        buffer[(value_x, y)].modifier.contains(Modifier::BOLD),
+        title == focused
+    );
+    assert_eq!(
+        buffer[(value_x, y)].bg,
+        if title == focused && level != ColorLevel::NoColor {
+            Color::DarkGray
+        } else {
+            Color::Reset
+        }
+    );
+    assert_eq!(buffer[(x, y)].bg, Color::Reset);
+    assert!(!buffer[(x, y)].modifier.contains(Modifier::BOLD));
+    assert!(!buffer[(x, y)].modifier.contains(Modifier::REVERSED));
+    assert_eq!(
+        buffer[(value_x, y)].modifier.contains(Modifier::REVERSED),
+        title == focused && level == ColorLevel::NoColor
+    );
+    assert!(!row(buffer, y).contains('>'));
+    if title == "Color" {
+        assert_eq!(buffer[(value_x - 2, y)].bg, Color::Reset);
+        assert!(
+            !buffer[(value_x - 2, y)]
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+    assert!(!buffer[(70, y)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(70, y)].bg, Color::Reset);
+}
+
 #[test]
 fn only_editable_values_receive_local_focus_without_underlines_or_markers() {
     for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
@@ -48,41 +91,7 @@ fn only_editable_values_receive_local_focus_without_underlines_or_markers() {
         ] {
             let buffer = draw(&mut ui, 100, 24);
             for title in ["Name", "Color", "Description"] {
-                let (x, y) = locate(&buffer, title);
-                let value_x = x + 17;
-                for cell in (2..100).map(|x| &buffer[(x, y)]) {
-                    assert!(!cell.modifier.contains(Modifier::UNDERLINED));
-                }
-                assert_eq!(
-                    buffer[(value_x, y)].modifier.contains(Modifier::BOLD),
-                    title == focused
-                );
-                assert_eq!(
-                    buffer[(value_x, y)].bg,
-                    if title == focused && level != ColorLevel::NoColor {
-                        Color::DarkGray
-                    } else {
-                        Color::Reset
-                    }
-                );
-                assert_eq!(buffer[(x, y)].bg, Color::Reset);
-                assert!(!buffer[(x, y)].modifier.contains(Modifier::BOLD));
-                assert!(!buffer[(x, y)].modifier.contains(Modifier::REVERSED));
-                assert_eq!(
-                    buffer[(value_x, y)].modifier.contains(Modifier::REVERSED),
-                    title == focused && level == ColorLevel::NoColor
-                );
-                assert!(!row(&buffer, y).contains('>'));
-                if title == "Color" {
-                    assert_eq!(buffer[(value_x - 2, y)].bg, Color::Reset);
-                    assert!(
-                        !buffer[(value_x - 2, y)]
-                            .modifier
-                            .contains(Modifier::REVERSED)
-                    );
-                }
-                assert!(!buffer[(70, y)].modifier.contains(Modifier::BOLD));
-                assert_eq!(buffer[(70, y)].bg, Color::Reset);
+                assert_field_focus(&buffer, title, focused, level);
             }
             key(&mut ui, traversal);
         }
