@@ -1,3 +1,4 @@
+pub mod execute;
 pub mod model;
 pub mod plan;
 
