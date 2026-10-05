@@ -8,8 +8,10 @@ fn panic_hook_restores_original_on_return_and_unwind_without_stacking() {
     if std::env::var_os(CHILD).is_none() {
         // Hooks are process-global; isolate from concurrent tests and nextest.
         let thread = std::thread::current();
+        // Test-only self-spawn: the path is used only to rerun this test in an
+        // isolated child process, never as a security or trust decision.
         let mut command =
-            std::process::Command::new(std::env::current_exe().unwrap());
+            std::process::Command::new(std::env::current_exe().unwrap()); // nosemgrep
         command
             .args(["--exact", thread.name().unwrap(), "--nocapture"])
             .env(CHILD, "1");
