@@ -1,90 +1,79 @@
 # labeldeck
 
-Export, diff, and safely synchronize GitHub repository labels from a canonical JSON file.
+Export, edit, compare, copy, and synchronize GitHub repository labels.
+`labeldeck` runs on Linux, macOS, and Windows as a standalone CLI.
 
-`labeldeck` is a standalone cross-platform CLI (Linux, macOS, Windows) that keeps a GitHub repository's labels in line with a version-controlled canonical JSON file. It talks directly to the GitHub REST API — it does **not** require `gh`, `curl`, `jq`, Python, or Node at runtime — and uses the same TLS stack on every platform (rustls, no system OpenSSL).
+## Updating labels safely
 
-## Why update-in-place matters
+`labeldeck` updates existing labels in place, preserving their issue and pull
+request associations. It creates missing labels and keeps extra labels unless
+you enable pruning.
 
-Some label tools "sync" by deleting every label and recreating them. On GitHub, **deleting a label removes it from every issue and pull request it is attached to**. Recreating a label with the same name does not restore those associations; you lose history and open issues silently lose their labels.
+> **Pruning deletes labels and removes them from existing issues and pull requests.**
+> Preview with `--dry-run` or `labeldeck diff` before using `--prune`.
 
-`labeldeck` never does this. It uses GitHub's label-update API to change an existing label's colour or description *in place*, so the label keeps its identity and every issue/PR association survives:
-
-```text
-missing on GitHub          → created
-present but different      → updated in place (never renamed, never recreated)
-identical                  → left untouched
-present only on GitHub     → retained by default; deleted only when pruning
-```
-
-Because updates never rename, a difference that is only a change of name (for example `Bug` → `defect`) cannot be expressed by plain label JSON: it is applied as a create of the new name plus — only if pruning is enabled — a delete of the old one. There is no safe way to infer a rename from a name disappearing and another appearing, so `labeldeck` does not pretend to. Documented limitation, by design.
-
-> **Pruning warning.** With pruning enabled, a label that exists on GitHub but not in your canonical file is **deleted**. Deleting a label removes it from existing issues and pull requests. Keep pruning off (the default) unless you accept that consequence — and preview with `--dry-run` or `labeldeck diff` first.
+To rename a label while preserving its associations, use `labeldeck edit OWNER/REPO`.
+`sync` and `copy` treat a name change as a new label and keep the old one unless
+you enable pruning.
 
 ## Workflow
 
-```text
-export → edit/review the JSON (in a PR) → diff → sync
-```
-
 ```console
-# Capture the current labels of a repository as the canonical file
-$ labeldeck export seapagan/keyhold
+# Export a repository's labels to labels.json
+labeldeck export seapagan/keyhold
 
-# ...review/edit ./labels.json, commit it, get it code-reviewed...
+# Edit the file
+labeldeck edit
 
-# Preview what a sync would do (no changes, diff-style exit codes)
-$ labeldeck diff seapagan/lsplus
+# Preview changes to a target repository
+labeldeck diff seapagan/lsplus
 
-# Apply: create missing labels, update changed ones in place
-$ labeldeck sync seapagan/lsplus
-
-# Also delete labels missing from the canonical file (destructive)
-$ labeldeck sync seapagan/lsplus --prune
-
-# Preview pruning without doing anything
-$ labeldeck sync seapagan/lsplus --prune --dry-run
-
-# Copy a template repository's labels straight onto a new repository
-$ labeldeck copy seapagan/template seapagan/new-project
-
-# Preview that copy (or its pruning) without changing anything
-$ labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
-
-# Establish your personal default deck once
-$ labeldeck export seapagan/labeldeck --global
-
-# Use a different canonical file for any of the above
-$ labeldeck diff seapagan/lsplus --file other.json
+# Apply the changes
+labeldeck sync seapagan/lsplus
 ```
 
-## CLI surface
+## Commands
 
-```text
-labeldeck [--no-proxy] export OWNER/REPO [--file PATH | --global] [--force]
-labeldeck [--no-proxy] diff OWNER/REPO [--file PATH] [--prune | --no-prune]
-labeldeck [--no-proxy] sync OWNER/REPO [--file PATH] [--prune | --no-prune] [--dry-run]
-labeldeck [--no-proxy] copy SOURCE TARGET [--prune | --no-prune] [--dry-run]
-labeldeck [--no-proxy] auth login [--token-stdin]
-labeldeck auth logout
-labeldeck auth status
-```
+| Command | Use |
+|---------|-----|
+| `export OWNER/REPO` | Save repository labels to a JSON file |
+| `diff OWNER/REPO` | Compare a deck with repository labels |
+| `edit` | Edit a local or global deck, or live repository labels |
+| `sync OWNER/REPO` | Apply a deck to a repository |
+| `copy SOURCE TARGET` | Copy labels between repositories |
+| `auth login`, `auth status`, `auth logout` | Manage credentials |
 
-All repository commands take `OWNER/REPO` arguments (`copy` takes two:
-`SOURCE` then `TARGET`; URLs are not accepted).
-Reads resolve the canonical deck as `--file PATH` → `./labels.json` →
-`<config dir>/labels.json` (the global default deck). The `--no-proxy`
-flag (usable anywhere) bypasses any configured HTTP proxy for that
-invocation; by default the normal proxy environment
-(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) is honoured.
+Use `labeldeck --help` or `labeldeck COMMAND --help` for all options.
+Specify repositories as `OWNER/REPO`, not URLs.
 
 ### `export`
 
-Writes the repository's labels as canonical JSON to `./labels.json`. `--global` instead writes your **personal default deck** to `<labeldeck config directory>/labels.json` (the directory is created if needed) — see [the global default deck](#the-global-default-deck). An existing destination file is **never** overwritten unless `--force` is given, and that protection applies equally to the local default, `--global`, and any explicit `--file PATH`. `--file -` writes the JSON to standard output instead — nothing else is printed there, so it is safe to pipe — and cannot be combined with `--force` or `--global`, which are rejected as usage errors. Export works unauthenticated for public repositories (subject to GitHub's 60 requests/hour anonymous limit).
+`export` writes deterministic, name-sorted JSON suitable for version control and code review.
+
+Export writes to `./labels.json` by default. Choose another destination with
+`--file PATH`, or save a [global default deck](#the-global-default-deck) with `--global`:
+
+```console
+labeldeck export seapagan/keyhold --file team-labels.json
+labeldeck export seapagan/keyhold --global
+```
+
+Use `--force` to overwrite an existing destination. To pipe JSON to another
+command, use `--file -`; this option cannot combine with `--force` or `--global`.
+You can export public repositories without a token, subject to GitHub's anonymous
+rate limit.
 
 ### `diff`
 
-Compares the resolved deck (`--file PATH` → `./labels.json` → global default) with the live repository and prints one line per label, without changing anything:
+Compare a [selected deck](#the-global-default-deck) with the live repository
+without changing either:
+
+```console
+labeldeck diff seapagan/lsplus
+labeldeck diff seapagan/lsplus --file team-labels.json --prune
+```
+
+The output shows one action per label:
 
 ```text
 CREATE bug (color d73a4a, description "Something isn't working")
@@ -94,68 +83,121 @@ RETAIN legacy-label (target-only; kept because pruning is disabled)
 UNCHANGED feature
 ```
 
-`DELETE` appears only where the effective prune setting would actually remove the label; otherwise the extra label is shown as `RETAIN`.
+With pruning enabled, extra labels appear as `DELETE`; otherwise they appear as
+`RETAIN`. See [exit codes](#exit-codes) for use in scripts and CI.
+
+### `edit`
+
+Open an existing deck or edit live repository labels:
+
+```console
+labeldeck edit                       # Local labels.json
+labeldeck edit --global              # Global default deck
+labeldeck edit --file team-labels.json
+labeldeck edit seapagan/keyhold       # Live GitHub labels
+```
+
+Choose one source. Local edit opens `./labels.json` without a global fallback;
+`--global` and `--file PATH` open the specified deck. Edit requires an existing,
+valid deck and does not accept `--file -`. Use an interactive terminal of at least
+48 columns by 16 rows. Live editing requires [write credentials](#authentication).
+
+Select a label and press Enter to edit its Name, Color, and Description. Press
+Enter in the form to save your pending changes, or Esc to discard that form.
+Use Undo and Redo for saved edits, additions, and deletions.
+
+Press Ctrl-S or click Apply to review the confirmation, then choose Apply to
+write your changes. Apply is available in the list after you make changes;
+finish or cancel the form/filter first. Cancel exits without applying them.
+
+| Keys | Action |
+|------|--------|
+| Up/Down, PageUp/PageDown | Select a label |
+| Enter or `e` | Edit the selected label |
+| `n` | Add a label |
+| Delete at list level | Delete the selected label |
+| `/` | Filter labels by case-insensitive name substring |
+| Up/Down or Tab/Shift-Tab in the form | Select another field |
+| Left/Right, Home/End, Backspace/Delete in the form | Move the cursor or edit text |
+| Enter in the form | Save all three fields |
+| Esc in the form | Cancel the form, including a new label |
+| Enter / Esc in the filter | Accept the filter / restore the previous filter |
+| Ctrl-Z / Ctrl-Y | Undo / Redo; discard unsaved form input first |
+| Tab/Shift-Tab at list level | Cycle buttons |
+| Ctrl-S / Apply | Open the Apply confirmation from the list after changes |
+| `q` or Esc at list level, Ctrl-C anywhere | Cancel |
+
+You can click rows, buttons, and fields, or scroll labels with the mouse wheel.
+In the confirmation, use Left/Right or Tab/Shift-Tab to select Apply or Back,
+then press Enter. Esc returns to the editor.
+
+Enter six hex digits for Color, up to 50 characters for Name, and up to 100 for
+Description. The editor shows validation errors below the fields. Label names
+must be unique ignoring case before you apply changes.
+
+**Deleting a live label removes it from existing issues and pull requests.**
+Apply checks for source changes and refuses to proceed if it detects them.
+If a GitHub operation fails during Apply, review the reported results before
+retrying: completed changes remain in effect.
 
 ### `sync`
 
-Applies the plan read from the resolved deck (`--file PATH` → `./labels.json` → global default). Operations are ordered defensively: **all** creates and updates run first, and prune deletions start only after every one of them succeeded. Each mutation after the first waits about one second before its request, per GitHub's rate-limit guidance, so very large syncs take a little longer and stay within GitHub's secondary limits.
+Apply a [selected deck](#the-global-default-deck) to a repository:
 
-GitHub's REST API is not transactional. If an operation fails mid-run, `labeldeck` stops, reports exactly what was applied, what failed, and what was skipped — it does not pretend to roll anything back.
+```console
+labeldeck sync seapagan/lsplus
+labeldeck sync seapagan/lsplus --file team-labels.json
+labeldeck sync seapagan/lsplus --prune --dry-run
+```
 
-`--dry-run` performs **zero** mutations: it reads the repository, prints the plan, and exits successfully.
+Use `--dry-run` to preview changes. Use `--prune` to delete labels absent from
+the deck, or `--no-prune` to override a pruning preference in your configuration.
+
+If an operation fails, labeldeck stops and reports completed, failed, and skipped
+changes. Completed changes remain in effect.
 
 ### `copy`
 
-Copies the labels currently configured on one repository directly to another — no local canonical file is involved or resolved. `labeldeck copy SOURCE TARGET` reads `SOURCE`'s labels, reads `TARGET`'s labels, and then applies exactly the same reconciliation `sync` uses: missing labels are created, changed labels are updated in place, and target-only labels are kept unless pruning is enabled (with the same `--prune`/`--no-prune`/`config.toml` precedence). Both repositories are read completely before any mutation starts, and `SOURCE` is **only ever read** — it is never modified, and a failure fetching either repository leaves `TARGET` untouched.
+Copy labels from one repository to another without a local JSON file:
 
-`--dry-run` performs **zero** mutations: it prints the plan and the command to apply it. A normal copy needs write access to `TARGET` and read access to `SOURCE` with the same token; a public `SOURCE` (and public `TARGET` for `--dry-run`) can be read anonymously. Copying a repository onto itself (`labeldeck copy OWNER/REPO OWNER/REPO`, including case differences) is rejected as a usage error.
+```console
+labeldeck copy seapagan/template seapagan/new-project
+labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
+```
+
+Copy updates the target and leaves the source unchanged. Extra target labels
+remain unless you enable pruning. Use `--dry-run` to preview the changes.
+The same [authentication](#authentication) token must cover both repositories.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
-| `0`  | Success. For `diff`: no differences under the effective prune setting. |
-| `1`  | `diff` found differences (traditional diff-style semantics, suitable for CI). |
-| `2`  | Error: usage, invalid file/config/repository spec, authentication, network, or API failure. |
+| `0` | Success. For `diff`: no differences under the effective prune setting. |
+| `1` | `diff` found differences. |
+| `2` | Error: usage, invalid file/config/repository spec, authentication, network, or API failure. |
 
 ## The global default deck
 
-Keep one reusable personal label set in your labeldeck configuration
-directory (`~/.config/labeldeck/labels.json` on Linux,
-`~/Library/Application Support/labeldeck/labels.json` on macOS,
-`%APPDATA%\labeldeck\labels.json` on Windows; `LABELDECK_CONFIG_DIR`
-overrides the location):
+Save a reusable label set in your [configuration directory](#configuration):
 
 ```console
 labeldeck export seapagan/labeldeck --global
 ```
 
-`diff` and `sync` then use a repository-local `./labels.json` when one
-exists and automatically fall back to this global deck when it does not
-— so `labeldeck diff seapagan/foo` works in any directory you have not
-given its own deck.
-
-Precedence and safety rules:
+`diff` and `sync` select their deck in this order:
 
 ```text
 --file PATH → ./labels.json → <config dir>/labels.json
 ```
 
-- An explicit `--file` is authoritative: if that file is missing,
-  unreadable, or invalid, the command fails with that path — it never
-  silently falls back to any default.
-- A present-but-invalid local `./labels.json` is likewise an error; the
-  global deck is used only when the local default is genuinely absent.
-- When neither default exists, the error names both checked locations
-  and suggests `labeldeck export OWNER/REPO` (local),
-  `labeldeck export OWNER/REPO --global`, or `--file PATH`.
-- Overwrite protection (`--force`) applies equally to the local deck,
-  the global deck, and explicit `--file` paths; a plain
-  `labeldeck export OWNER/REPO` never modifies the global deck.
+They use the global deck if no local `labels.json` exists. A missing or invalid
+explicit file, or an unreadable or invalid local deck, causes an error rather
+than a fallback. `edit` requires `--global` to open the global deck.
 
 ## Canonical label file
 
-A JSON array of objects with exactly three keys:
+Use a JSON array of label objects:
 
 ```json
 [
@@ -172,77 +214,83 @@ A JSON array of objects with exactly three keys:
 ]
 ```
 
-- **name** — required, non-empty, at most 50 characters (GitHub's observed limit; it is not officially documented). Duplicate names — including duplicates that differ only in case, which GitHub treats as the same label — are rejected before any mutation.
-- **color** — required, six hexadecimal digits. A leading `#` and any letter case are accepted on input; the canonical form stored by GitHub and written by `export` is lowercase without `#` (for example `d73a4a`). Three-digit CSS shorthand is rejected, as GitHub rejects it too.
-- **description** — required key, string or `null` (`""` and `null` both mean "no description"). At most 100 characters.
+All three keys are required; unknown keys cause an error.
 
-Unknown keys are rejected, so a typo like `"colour"` fails loudly instead of silently dropping data. `export` output is deterministic: labels sorted by name, fixed field order, two-space indentation, one trailing newline — ready for code review.
+- **name**: non-empty, at most 50 characters. Names must be unique ignoring case.
+- **color**: six hex digits. File input accepts a leading `#` and uppercase letters;
+  export writes lowercase digits without `#`.
+- **description**: a string of at most 100 characters, or `null`. Use `""` or `null`
+  for no description.
 
-An empty canonical file (`[]`) is valid. With pruning enabled it means "delete every label" — deliberate, dangerous, and exactly why pruning is off by default.
+An empty deck (`[]`) is valid. **Syncing it with pruning enabled deletes all labels.**
 
 ## Authentication
 
-`labeldeck` resolves credentials in this order:
+```console
+labeldeck auth login
+labeldeck auth status
+labeldeck auth logout
+```
+
+Login prompts for a hidden token, validates it, and stores it. Use
+`labeldeck auth login --token-stdin` to supply a token through standard input.
+For scripts and CI, set a token environment variable. Credential precedence is:
 
 ```text
 LABELDECK_TOKEN → GH_TOKEN → GITHUB_TOKEN → stored labeldeck token → anonymous
 ```
 
-- Environment variables suit scripts and CI; `LABELDECK_TOKEN` wins so you can override a ambient `GH_TOKEN` when needed. Blank values count as unset.
-- Anonymous access works for public repositories (reads only).
-- Private repositories and all write operations require a token.
+Blank values count as unset. Environment-provided tokens stay out of the stored
+token file. If sync prompts you for a token on first use, you can decline to save
+it and use it for that run.
 
-Tokens are never accepted as command-line arguments, where process listings could observe them. `labeldeck auth login` prompts for the token with the input hidden (`--token-stdin` reads it from standard input in scripts), validates it against GitHub, and stores it — persistence is the purpose of the command, so there is no extra confirmation. The interactive first-use flow that `sync` offers when no token exists behaves differently: it prompts securely, validates, then asks whether to store the token for future use (defaulting to yes). Answering `n` keeps the token in memory for that run only and writes nothing to disk. Environment-provided tokens are never persisted by any command.
-
-Token permissions needed:
+Public repositories allow anonymous reads. Private repositories and write
+operations require a token with these permissions:
 
 | Use | Classic PAT | Fine-grained PAT |
 |-----|-------------|------------------|
 | Read labels (public repo) | none | none |
-| Read labels (private repo) | `repo` (or `public_repo` for public only) | Issues: read + Metadata: read |
+| Read labels (private repo) | `repo` | Issues: read + Metadata: read |
 | Create/update/delete labels | `repo` (or `public_repo` for public only) | Issues: write + Metadata: read |
 
-For `copy`, one token covers both sides: it needs write access to `TARGET` and (for a private `SOURCE`) read access to it.
+For `copy`, the token needs write access to the target and read access to a private
+source. A dry run can read public repositories without a token.
 
 ### Token storage and security
 
-- The stored token lives in its own file (`token`) inside the labeldeck configuration directory — **never** in `config.toml`.
-- On Linux/macOS the file is created with mode `0600` (owner read/write only) inside a `0700` directory.
-- On Windows the file is written with the default protections of your user profile directory; no stronger ACL guarantee is claimed or implemented.
-- `auth status` reports whether a token is available and *where it came from* (which variable, or the stored-file path). It never prints the token itself, and tokens never appear in diagnostics, errors, or debug output.
-- `auth logout` deletes the stored token. Environment-provided tokens are unaffected.
+Login stores your token in a file named `token` in the [configuration directory](#configuration).
+On Linux and macOS, only the owner can read or write the file (`0600`), inside an
+owner-only directory (`0700`). On Windows, the file uses your user profile's
+default permissions.
+
+`auth status` reports the credential source without displaying the token.
+`auth logout` removes the stored token; it does not unset environment variables.
 
 ## Configuration
 
-`config.toml` in the labeldeck configuration directory. It is deliberately tiny — one key today:
+Set preferences in `config.toml` in the labeldeck configuration directory:
 
 ```toml
 prune = true
 ```
 
-- `prune` (optional, default `false`): delete target-only labels during `sync` and `copy`.
-- Precedence: `--prune`/`--no-prune` on the command line beats the config file, which beats the built-in default. A user who has `prune = true` can still pass `--no-prune` for one invocation.
-- Unknown keys and malformed files are hard errors with the file path and a precise reason.
+Pruning defaults to `false`. `--prune` or `--no-prune` overrides the config file
+for one invocation. Unknown keys and malformed files cause an error.
 
-Configuration directory locations:
-
-| Platform | Path |
-|----------|------|
+| Platform | Configuration directory |
+|----------|-------------------------|
 | Linux | `~/.config/labeldeck` (`$XDG_CONFIG_HOME` honoured) |
 | macOS | `~/Library/Application Support/labeldeck` |
 | Windows | `%APPDATA%\labeldeck` |
 
-`LABELDECK_CONFIG_DIR` overrides the location (used by tests and sandboxed automation). Files: `config.toml` for preferences, `token` for the stored credential.
+Use `LABELDECK_CONFIG_DIR` to choose another directory. It holds `config.toml`,
+the stored `token`, and the global `labels.json` deck.
 
-Two other environment variables are understood:
+Standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+and `NO_PROXY`, upper or lower case) apply by default. Pass `--no-proxy` to bypass
+proxies for one invocation.
 
-- `LABELDECK_API` — override the GitHub API base URL (an internal/testing escape hatch; unset for normal use).
-- `LABELDECK_CONFIG_DIR` — see above.
-
-Proxy handling: standard proxy environment variables
-(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`, upper or lower case)
-are honoured by default. Pass `--no-proxy` to bypass every proxy for a
-single invocation; there is no persistent proxy configuration.
+Set `NO_COLOR` to disable colour output, including editor swatches.
 
 ## Installation
 
@@ -251,7 +299,7 @@ single invocation; there is no persistent proxy configuration.
 Download from the [releases page](https://github.com/seapagan/labeldeck/releases). Every archive has a `.sha256` sidecar; verify before use:
 
 ```console
-$ sha256sum -c labeldeck-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c labeldeck-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 ```
 
 Published targets:
@@ -267,15 +315,17 @@ Published targets:
 | `x86_64-pc-windows-msvc` | `.zip` |
 | `aarch64-pc-windows-msvc` | `.zip` |
 
-Linux GNU builds are produced in a manylinux 2.28 container and are verified not to require a glibc newer than 2.28; on older systems the installer automatically selects the fully static musl build instead.
+Linux GNU builds require glibc 2.28 or newer. On older systems, the installer selects the static musl build.
+
+The installer verifies the checksum and validates the downloaded binary before replacing an existing installation.
 
 #### Unix installer (Linux/macOS)
 
 ```console
-$ curl -fsSL https://raw.githubusercontent.com/seapagan/labeldeck/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/seapagan/labeldeck/main/install.sh | sh
 ```
 
-The installer selects the right architecture and libc, verifies the SHA-256 before extracting, runs the binary's `--version` to confirm it works, and only then replaces any existing installation (atomically, on the same filesystem). An explicit version can be pinned with `LABELDECK_VERSION=v0.1.0`, and `LABELDECK_LIBC=gnu|musl` overrides libc selection on Linux.
+The installer selects a compatible binary and verifies its SHA-256 checksum. Set `LABELDECK_VERSION` to choose a release, or `LABELDECK_LIBC=gnu|musl` to override libc selection on Linux.
 
 #### Windows installer (PowerShell)
 
@@ -290,30 +340,22 @@ or, if your execution policy allows:
 PS> irm https://raw.githubusercontent.com/seapagan/labeldeck/main/install.ps1 | iex
 ```
 
-The same guarantees: architecture detection (x64 and ARM64), SHA-256 verification with `Get-FileHash`, the candidate's `--version` is executed before anything replaces an existing binary, and failures never destroy a working installation. `LABELDECK_VERSION` pins a version here too.
+The installer supports x64 and ARM64 and verifies the SHA-256 checksum. Set `LABELDECK_VERSION` to choose a release.
 
 ### cargo-binstall
 
 ```console
-$ cargo binstall labeldeck
+cargo binstall labeldeck
 ```
 
 ### From source
 
 ```console
-$ cargo install --locked --git https://github.com/seapagan/labeldeck
+cargo install --locked --git https://github.com/seapagan/labeldeck
 ```
 
-Requires a Rust toolchain; see the MSRV below.
-
-## Minimum Supported Rust Version
-
-The MSRV is **1.88.0**, declared once in `Cargo.toml` (`rust-version`) as the single source of truth. The local gate (`cargo make msrv`) and the CI MSRV job both read that value directly from `Cargo.toml`, so no duplicate copy can drift. It is verified in CI on every push, and the dependency graph uses the MSRV-aware resolver so dependency updates cannot silently raise it past the declared value.
-
-## Direct GitHub API usage
-
-`labeldeck` implements the documented REST endpoints itself (list with `Link`-header pagination, create, in-place update, delete) over a small synchronous HTTP client with rustls. There is no runtime dependency on the GitHub CLI or any other external tool, and no async runtime. Requests follow GitHub's conventions: `User-Agent`, `Accept: application/vnd.github+json`, the pinned `X-GitHub-Api-Version` header, and Bearer authentication.
+Building from source requires Rust **1.88.0** or newer.
 
 ## Licence
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option, the standard Rust ecosystem licence pair. Both licence texts ship in the repository and in release archives.
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.

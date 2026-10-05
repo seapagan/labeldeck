@@ -8,6 +8,7 @@ use crate::commands::{
 };
 use crate::deck;
 use crate::error::{Error, Result};
+use crate::staged_write::durability_warning;
 
 pub fn run(
     repo: &str,
@@ -86,17 +87,6 @@ pub fn run(
         eprintln!("{}", durability_warning(&error));
     }
     Ok(0)
-}
-
-/// The warning shown when the deck was installed at the commit point
-/// but the post-commit destination-directory sync failed. The export
-/// itself succeeded; durability is merely unconfirmed.
-fn durability_warning(error: &std::io::Error) -> String {
-    format!(
-        "warning: the deck was installed successfully, but filesystem \
-         durability could not be confirmed because the destination \
-         directory could not be synchronized: {error}"
-    )
 }
 
 #[cfg(test)]

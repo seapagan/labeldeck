@@ -316,6 +316,38 @@ impl GitHubClient {
         }
     }
 
+    /// Edit an identity in place, including its explicit new name.
+    /// Reconciliation uses `update_label` instead and never sends `new_name`.
+    pub fn edit_label(
+        &self,
+        repo: &RepoSpec,
+        current_name: &str,
+        desired: &Label,
+    ) -> Result<(), GithubError> {
+        let reply = self.send_json(
+            "PATCH",
+            &format!(
+                "/repos/{}/{}/labels/{}",
+                percent_encode(&repo.owner),
+                percent_encode(&repo.name),
+                percent_encode(current_name)
+            ),
+            &EditLabelBody {
+                new_name: &desired.name,
+                color: desired.color.as_str(),
+                description: &desired.description,
+            },
+        )?;
+        if reply.is_success() {
+            Ok(())
+        } else {
+            Err(reply.error(format!(
+                "editing label {current_name:?} to {:?}",
+                desired.name
+            )))
+        }
+    }
+
     /// Delete a label. Success is HTTP 204.
     pub fn delete_label(
         &self,
@@ -532,6 +564,13 @@ struct CreateLabelBody<'a> {
 /// modified in place and issue/pull-request associations are preserved.
 #[derive(serde::Serialize)]
 struct UpdateLabelBody<'a> {
+    color: &'a str,
+    description: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct EditLabelBody<'a> {
+    new_name: &'a str,
     color: &'a str,
     description: &'a str,
 }

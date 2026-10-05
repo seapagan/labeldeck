@@ -20,7 +20,7 @@ use crate::plan::{Deletion, Plan, Update};
 /// Pause before each mutative API call except the first (GitHub best
 /// practice: avoid secondary rate limits such as the 80 content-creating
 /// requests/minute ceiling).
-const MUTATION_PAUSE: Duration = Duration::from_secs(1);
+pub(crate) const MUTATION_PAUSE: Duration = Duration::from_secs(1);
 
 /// Which phase an execution stopped in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -380,3 +380,14 @@ fn sync_directory(_dir: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+/// The warning shown when the deck was installed at the commit point
+/// but the post-commit destination-directory sync failed. The export
+/// itself succeeded; durability is merely unconfirmed.
+pub(crate) fn durability_warning(error: &std::io::Error) -> String {
+    format!(
+        "warning: the deck was installed successfully, but filesystem \
+         durability could not be confirmed because the destination \
+         directory could not be synchronized: {error}"
+    )
+}
