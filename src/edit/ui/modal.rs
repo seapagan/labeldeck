@@ -2,7 +2,7 @@ use super::{
     UiAction, UiState,
     theme::{Role, UiTheme},
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{HorizontalAlignment, Rect},
@@ -12,6 +12,12 @@ use ratatui::{
 
 impl UiState {
     pub(super) fn modal_key(&mut self, key: KeyEvent) -> Option<UiAction> {
+        if key.modifiers != KeyModifiers::NONE
+            && !(key.code == KeyCode::BackTab
+                && key.modifiers == KeyModifiers::SHIFT)
+        {
+            return None;
+        }
         let modal = self.modal.as_mut()?;
         match key.code {
             KeyCode::Esc => self.dismiss_modal(),

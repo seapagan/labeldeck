@@ -309,11 +309,8 @@ impl UiState {
     }
 
     fn activate(&mut self, button: usize) -> Option<UiAction> {
-        if button == 2 && !self.apply_available() {
-            // Retain the existing no-changes message in list mode only.
-            if matches!(self.mode, Mode::List) && self.modal.is_none() {
-                self.confirm();
-            }
+        if button == 2 {
+            self.confirm();
             return None;
         }
         self.error.clear();
@@ -326,7 +323,6 @@ impl UiState {
                 self.document.redo();
                 self.repair_selection();
             }
-            2 => self.confirm(),
             _ => return Some(UiAction::Cancel),
         }
         None
