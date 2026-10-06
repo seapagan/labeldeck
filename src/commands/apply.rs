@@ -54,7 +54,17 @@ pub(crate) fn execute(
 ) -> Result<i32> {
     let result = plan::plan(desired, remote, prune);
 
-    if prune && !result.deletes.is_empty() {
+    execute_plan(client, target, &result, success_line)
+}
+
+/// Execute exactly the reviewed operations, preserving ordering and accounting.
+pub(crate) fn execute_plan(
+    client: &GitHubClient,
+    target: &RepoSpec,
+    result: &plan::Plan,
+    success_line: &str,
+) -> Result<i32> {
+    if !result.deletes.is_empty() {
         eprintln!(
             "warning: pruning will DELETE {} target-only label(s); \
              deleting a label removes it from existing issues and pull \
@@ -64,7 +74,7 @@ pub(crate) fn execute(
     }
 
     let mut printer = StderrReporter;
-    let outcome = sync_engine::execute(client, target, &result, &mut printer);
+    let outcome = sync_engine::execute(client, target, result, &mut printer);
 
     if outcome.is_success() {
         eprintln!(
@@ -97,5 +107,26 @@ struct StderrReporter;
 impl sync_engine::Reporter for StderrReporter {
     fn operation(&mut self, description: &str) {
         eprintln!("labeldeck: {description}...");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn executing_an_empty_selected_plan_performs_no_network_work() {
+        let client =
+            GitHubClient::with_options("http://127.0.0.1:1", None, true);
+        let target = RepoSpec::parse("o/r").unwrap();
+        assert_eq!(
+            execute_plan(
+                &client,
+                &target,
+                &plan::Plan::default(),
+                "Selected plan"
+            )
+            .unwrap(),
+            0
+        );
     }
 }
