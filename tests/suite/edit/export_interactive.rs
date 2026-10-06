@@ -97,6 +97,44 @@ fn late_export_destination_refuses_overwrite_without_force() {
 }
 
 #[test]
+fn global_export_rechecks_configuration_directory_after_terminal_exit() {
+    let mock = source();
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config");
+    let destination = config.join("labels.json");
+    let client = GitHubClient::with_options(mock.base_url(), None, true);
+    let result = interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        &destination,
+        false,
+        true,
+        &config,
+        |state, _| {
+            std::fs::write(&config, "appeared while open").unwrap();
+            SessionResult {
+                outcome: Ok(UiAction::Finish(FinalSelection::Export(
+                    state.selected_labels().unwrap(),
+                ))),
+                saves: Vec::new(),
+            }
+        },
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("could not create or secure configuration directory")
+    );
+    assert_eq!(
+        std::fs::read_to_string(config).unwrap(),
+        "appeared while open"
+    );
+    assert!(!destination.exists());
+    mock.assert_satisfied();
+}
+
+#[test]
 fn export_cancel_after_save_keeps_full_deck_and_skips_final_destination() {
     let mock = source();
     let root = tempfile::tempdir().unwrap();
