@@ -106,6 +106,9 @@ pub enum Command {
                       without changing anything."
     )]
     Sync {
+        /// Select reconciliation operations and edit a working deck in the terminal.
+        #[arg(short = 'i', long, conflicts_with = "dry_run")]
+        interactive: bool,
         /// Repository to synchronize, as OWNER/REPO.
         repo: String,
         /// Use PATH exactly instead of ./labels.json or the global

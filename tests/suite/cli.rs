@@ -1552,3 +1552,29 @@ fn interactive_export_rejects_stdout_before_any_terminal_or_network_work() {
             .contains("--interactive cannot be combined with --file -")
     );
 }
+
+#[test]
+fn interactive_sync_accepts_both_forms_and_conflicts_with_dry_run() {
+    use clap::Parser;
+    for flag in ["-i", "--interactive"] {
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "sync",
+                "o/r",
+                flag
+            ])
+            .is_ok()
+        );
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "sync",
+                "o/r",
+                flag,
+                "--dry-run"
+            ])
+            .is_err()
+        );
+    }
+}

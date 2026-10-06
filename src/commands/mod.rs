@@ -6,6 +6,7 @@ pub mod copy;
 pub mod diff;
 pub mod edit;
 pub mod export;
+pub mod interactive;
 pub mod sync;
 
 use std::path::PathBuf;
