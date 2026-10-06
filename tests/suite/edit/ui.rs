@@ -259,9 +259,7 @@ fn keyboard_buttons_support_history_apply_and_cancel_without_mouse() {
     key(&mut ui, KeyCode::Enter);
     assert!(screen(&mut ui, 80, 24).contains("Confirm Apply"));
     key(&mut ui, KeyCode::Esc);
-    key(&mut ui, KeyCode::BackTab);
-    key(&mut ui, KeyCode::BackTab);
-    key(&mut ui, KeyCode::BackTab);
+    key(&mut ui, KeyCode::Tab);
     assert!(matches!(
         key(&mut ui, KeyCode::Enter),
         Some(UiAction::Cancel)

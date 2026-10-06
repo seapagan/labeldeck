@@ -18,7 +18,7 @@ impl UiState {
         {
             return None;
         }
-        let modal = self.modal.as_mut()?;
+        let super::Modal::Apply(modal) = self.modal.as_mut()?;
         match key.code {
             KeyCode::Esc => self.dismiss_modal(),
             KeyCode::Tab
@@ -40,7 +40,7 @@ impl UiState {
     }
 
     pub(super) fn render_modal(&mut self, frame: &mut Frame) {
-        let Some(modal) = &self.modal else {
+        let Some(super::Modal::Apply(modal)) = &self.modal else {
             return;
         };
         let theme = UiTheme::new(self.level, false);

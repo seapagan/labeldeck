@@ -76,14 +76,10 @@ fn control_history_and_apply_route_to_committed_document() {
 }
 
 #[test]
-fn enter_on_disabled_apply_never_opens_confirmation() {
+fn unavailable_apply_cannot_be_activated() {
     let mut ui = state();
-    for _ in 0..3 {
-        key(&mut ui, KeyCode::Tab, KeyModifiers::NONE);
-    }
-    assert_eq!(ui.button, Some(2));
     assert!(!ui.apply_available());
-    assert!(key(&mut ui, KeyCode::Enter, KeyModifiers::NONE).is_none());
+    assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.modal.is_none());
     assert!(matches!(ui.mode, Mode::List));
     assert!(!ui.document.can_undo());
@@ -147,7 +143,7 @@ fn apply_in_submodes_preserves_input_and_history() {
         ctrl(&mut ui, 's');
         assert!(ui.modal.is_none());
         assert!(!ui.apply_available());
-        assert!(ui.activate(2).is_none());
+        assert!(ui.activate(Control::Apply).is_none());
         assert!(ui.modal.is_none());
         match &ui.mode {
             Mode::Edit(form) => assert_eq!(form.draft().name, "bug draft"),
@@ -212,9 +208,9 @@ fn modified_modal_enter_never_activates_either_choice() {
             let mut ui = state();
             ui.delete_selected();
             ui.confirm();
-            ui.modal.as_mut().unwrap().apply = apply;
+            apply_modal(&mut ui).apply = apply;
             assert!(key(&mut ui, KeyCode::Enter, modifiers).is_none());
-            assert_eq!(ui.modal.as_ref().unwrap().apply, apply);
+            assert_eq!(apply_modal(&mut ui).apply, apply);
         }
     }
 }
@@ -236,9 +232,9 @@ fn modified_modal_navigation_preserves_focus_and_confirmation() {
             ui.delete_selected();
             ui.confirm();
             for apply in [false, true] {
-                ui.modal.as_mut().unwrap().apply = apply;
+                apply_modal(&mut ui).apply = apply;
                 assert!(key(&mut ui, code, modifiers).is_none());
-                assert_eq!(ui.modal.as_ref().unwrap().apply, apply);
+                assert_eq!(apply_modal(&mut ui).apply, apply);
             }
         }
     }
@@ -251,10 +247,10 @@ fn shift_backtab_navigates_modal_and_control_c_still_cancels() {
     ui.confirm();
     assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
     key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(ui.modal.as_ref().unwrap().apply);
+    assert!(apply_modal(&mut ui).apply);
     assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
     key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(!ui.modal.as_ref().unwrap().apply);
+    assert!(!apply_modal(&mut ui).apply);
     assert!(key(&mut ui, KeyCode::Enter, KeyModifiers::NONE).is_none());
     assert!(ui.modal.is_none());
 }
@@ -262,15 +258,15 @@ fn shift_backtab_navigates_modal_and_control_c_still_cancels() {
 #[test]
 fn apply_button_delegates_no_changes_and_confirmation_to_confirm() {
     let mut ui = state();
-    assert!(ui.activate(2).is_none());
+    assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.modal.is_none());
     assert_eq!(ui.error, "No changes to apply.");
     ui.delete_selected();
-    assert!(ui.activate(2).is_none());
+    assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.error.is_empty());
-    assert!(!ui.modal.as_ref().unwrap().apply);
-    assert!(ui.activate(2).is_none());
-    assert!(!ui.modal.as_ref().unwrap().apply);
+    assert!(!apply_modal(&mut ui).apply);
+    assert!(ui.activate(Control::Apply).is_none());
+    assert!(!apply_modal(&mut ui).apply);
 }
 
 #[test]
@@ -350,4 +346,19 @@ fn ratatui_advances_offset_without_manual_scroll_management() {
     let rows = ui.rows;
     click(&mut ui, rows.x, rows.y);
     assert_eq!(ui.selected, Some(offset as u64));
+}
+
+#[test]
+fn focus_skips_unavailable_history_and_apply() {
+    let mut ui = state();
+    key(&mut ui, KeyCode::Tab, KeyModifiers::NONE);
+    assert!(matches!(
+        key(&mut ui, KeyCode::Enter, KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+}
+
+fn apply_modal(ui: &mut UiState) -> &mut ConfirmApply {
+    let Modal::Apply(modal) = ui.modal.as_mut().unwrap();
+    modal
 }

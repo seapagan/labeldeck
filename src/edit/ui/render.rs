@@ -44,15 +44,17 @@ impl UiState {
 
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
-        self.small = area.width < 48 || area.height < 16;
+        self.small = self.too_small(area.width, area.height);
         self.buttons.clear();
         self.fields = [Rect::default(); 3];
         self.rows = Rect::default();
         if self.small {
             frame.render_widget(
-                Paragraph::new(
-                    "terminal too small (minimum 48x16); Esc/Ctrl-C to cancel",
-                ),
+                Paragraph::new(format!(
+                    "terminal too small (minimum {}x{}); Esc/Ctrl-C to cancel",
+                    self.minimum_size().0,
+                    self.minimum_size().1
+                )),
                 area,
             );
             return;

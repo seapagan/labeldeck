@@ -1,6 +1,7 @@
 //! Small terminal editor with independently testable rendering and events.
 
 mod controls;
+use controls::Control;
 mod events;
 mod form;
 mod modal;
@@ -70,6 +71,24 @@ enum Mode {
     Filter { before: String, input: Input },
 }
 
+enum Modal {
+    Apply(ConfirmApply),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionKind {
+    Edit,
+    Export,
+    Sync,
+    Copy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceMode {
+    Edit,
+    Select,
+}
+
 struct ConfirmApply {
     summary: ChangeSummary,
     apply: bool,
@@ -77,15 +96,17 @@ struct ConfirmApply {
 
 pub struct UiState {
     document: Document,
+    session: SessionKind,
+    workspace: WorkspaceMode,
     title: String,
     live: bool,
     level: ColorLevel,
     selected: Option<EntryId>,
     filter: String,
     mode: Mode,
-    modal: Option<ConfirmApply>,
+    modal: Option<Modal>,
     error: String,
-    button: Option<usize>,
+    button: Option<Control>,
     buttons: Vec<Rect>,
     rows: Rect,
     fields: [Rect; 3],
@@ -103,6 +124,8 @@ impl UiState {
         let selected = visible_ids(&document, "").first().copied();
         Self {
             document,
+            session: SessionKind::Edit,
+            workspace: WorkspaceMode::Edit,
             title,
             live,
             level,
@@ -118,6 +141,23 @@ impl UiState {
             table: TableState::default(),
             small: false,
         }
+    }
+    pub fn session(&self) -> SessionKind {
+        self.session
+    }
+    pub fn workspace(&self) -> WorkspaceMode {
+        self.workspace
+    }
+    pub fn minimum_size(&self) -> (u16, u16) {
+        if self.session == SessionKind::Edit {
+            (48, 16)
+        } else {
+            (60, 16)
+        }
+    }
+    fn too_small(&self, width: u16, height: u16) -> bool {
+        let (minimum_width, minimum_height) = self.minimum_size();
+        width < minimum_width || height < minimum_height
     }
     pub fn document(&self) -> &Document {
         &self.document

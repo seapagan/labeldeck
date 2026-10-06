@@ -1,4 +1,6 @@
-use super::{ConfirmApply, Mode, UiAction, UiState, form::EditForm};
+use super::{
+    ConfirmApply, Control, Modal, Mode, UiAction, UiState, form::EditForm,
+};
 use crate::edit::{
     model::{Draft, visible_ids},
     plan,
@@ -29,7 +31,7 @@ impl UiState {
     }
 
     fn resize(&mut self, width: u16, height: u16) {
-        self.small = width < 48 || height < 16;
+        self.small = self.too_small(width, height);
         self.buttons.clear();
         self.fields = [ratatui::layout::Rect::default(); 3];
         self.rows = ratatui::layout::Rect::default();
@@ -130,12 +132,8 @@ impl UiState {
             KeyCode::PageDown => {
                 self.navigate(self.rows.height.max(5) as isize)
             }
-            KeyCode::Tab => {
-                self.button = Some(self.button.map_or(0, |i| (i + 1) % 4))
-            }
-            KeyCode::BackTab => {
-                self.button = Some(self.button.map_or(3, |i| (i + 3) % 4))
-            }
+            KeyCode::Tab => self.focus_control(false),
+            KeyCode::BackTab => self.focus_control(true),
             KeyCode::Enter if self.button.is_some() => {
                 return self.activate(self.button.unwrap());
             }
@@ -297,10 +295,10 @@ impl UiState {
         }
         match plan::plan(&self.document) {
             Ok(plan) => {
-                self.modal = Some(ConfirmApply {
+                self.modal = Some(Modal::Apply(ConfirmApply {
                     summary: plan.summary,
                     apply: false,
-                });
+                }));
                 self.buttons.clear();
                 self.error.clear();
             }
@@ -308,22 +306,26 @@ impl UiState {
         }
     }
 
-    fn activate(&mut self, button: usize) -> Option<UiAction> {
-        if button == 2 {
+    fn activate(&mut self, control: Control) -> Option<UiAction> {
+        if control == Control::Apply {
             self.confirm();
             return None;
         }
+        if !self.enabled(control) {
+            return None;
+        }
         self.error.clear();
-        match button {
-            0 => {
+        match control {
+            Control::Undo => {
                 self.document.undo();
                 self.repair_selection();
             }
-            1 => {
+            Control::Redo => {
                 self.document.redo();
                 self.repair_selection();
             }
-            _ => return Some(UiAction::Cancel),
+            Control::Cancel => return Some(UiAction::Cancel),
+            Control::Apply => unreachable!(),
         }
         None
     }
@@ -364,7 +366,7 @@ impl UiState {
                 if let Some(index) =
                     self.buttons.iter().position(|r| r.contains(position))
                 {
-                    return self.activate(index);
+                    return self.activate(self.controls()[index]);
                 }
                 if self.rows.contains(position) {
                     let index = usize::from(mouse.row - self.rows.y)

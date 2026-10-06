@@ -58,7 +58,7 @@ fn modal_owns_input_and_back_restores_filter_selection_and_footer_focus() {
     key(&mut ui, KeyCode::Enter);
     ui.handle(Event::Paste(" new".into()));
     key(&mut ui, KeyCode::Enter);
-    for _ in 0..3 {
+    for _ in 0..2 {
         key(&mut ui, KeyCode::Tab);
     }
     ctrl(&mut ui, 's');
