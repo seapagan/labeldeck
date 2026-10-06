@@ -142,3 +142,29 @@ fn standalone_edit_terminal_save_then_cancel_preserves_source() {
     assert!(output.contains("Completed Saves remain on disk"));
     assert_eq!(std::fs::read_to_string(path).unwrap(), deck);
 }
+
+#[test]
+fn remote_edit_terminal_save_then_cancel_leaves_github_unchanged() {
+    let isolation = Isolation::new("interactive-pty-remote-edit");
+    let mock = mock_github(vec![
+        Expectation::get("/repos/o/r/labels?per_page=100")
+            .labels_page(&labels_json(&[("bug", "ededed", Some(""))]), None),
+    ]);
+    let output = terminal(
+        &isolation,
+        &["edit", "o/r"],
+        mock.base_url(),
+        &[
+            ("labeldeck edit", "s"),
+            ("Save working deck", "\t\r"),
+            ("Saved", "\u{3}"),
+        ],
+    );
+    assert!(output.contains("Completed Saves remain on disk"));
+    let deck = labeldeck::commands::read_canonical(
+        &isolation.config_dir.join("labels.json"),
+    )
+    .unwrap();
+    assert_eq!(deck[0].name, "bug");
+    mock.assert_satisfied();
+}

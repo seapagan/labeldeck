@@ -133,15 +133,16 @@ pub fn run(
                 &client,
                 &repo,
                 |document, title, live| {
-                    open(document, title, live, &config_dir)
+                    open(document, title, live, &config_dir, None)
                 },
             )
         }
-        selection => {
-            edit_file_session_with(&selection, |document, title, live| {
-                open(document, title, live, &config_dir)
-            })
-        }
+        selection => edit_file_session_with(
+            &selection,
+            |document, title, live, source| {
+                open(document, title, live, &config_dir, Some(source.into()))
+            },
+        ),
     }
 }
 
@@ -151,20 +152,21 @@ pub fn edit_file_with(
     selection: &SourceSelection,
     editor: impl FnOnce(Document, &str, bool) -> Result<Option<Document>>,
 ) -> Result<i32> {
-    edit_file_session_with(selection, |document, title, live| {
+    edit_file_session_with(selection, |document, title, live, _| {
         editor_result(editor(document, title, live))
     })
 }
 
 pub fn edit_file_session_with(
     selection: &SourceSelection,
-    editor: impl FnOnce(Document, &str, bool) -> SessionResult,
+    editor: impl FnOnce(Document, &str, bool, &Path) -> SessionResult,
 ) -> Result<i32> {
     let snapshot = load_file(selection)?;
     let document = editor(
         Document::from_labels(snapshot.baseline.clone()),
         &snapshot.path.display().to_string(),
         false,
+        &snapshot.path,
     );
     finish_edit(document, |document| {
         apply_file(
@@ -214,11 +216,9 @@ fn open(
     title: &str,
     live: bool,
     config_dir: &Path,
+    protected: Option<PathBuf>,
 ) -> SessionResult {
-    let host = SaveHost::new(
-        config_dir.into(),
-        if live { None } else { Some(title.into()) },
-    );
+    let host = SaveHost::new(config_dir.into(), protected);
     let level = colored_text::ColorizeConfig::color_level(
         colored_text::RenderTarget::Stdout,
     );

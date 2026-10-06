@@ -4,23 +4,114 @@ use std::{
     path::{Path, PathBuf},
 };
 
+struct Resolved {
+    path: PathBuf,
+    #[cfg(any(target_os = "macos", test))]
+    ancestor: PathBuf,
+}
+
 pub fn same_destination(left: &Path, right: &Path) -> io::Result<bool> {
     let left = resolve(left)?;
     let right = resolve(right)?;
     #[cfg(windows)]
     {
         Ok(left
+            .path
             .as_os_str()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy()))
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(right.path.as_os_str().as_encoded_bytes()))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        Ok(left == right)
+        same_resolved(&left, &right, case_insensitive)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        Ok(left.path == right.path)
     }
 }
 
-fn resolve(path: &Path) -> io::Result<PathBuf> {
+#[cfg(any(target_os = "macos", test))]
+fn same_resolved(
+    left: &Resolved,
+    right: &Resolved,
+    probe: impl Fn(&Path) -> io::Result<bool>,
+) -> io::Result<bool> {
+    if left.path == right.path {
+        return Ok(true);
+    }
+    if left.ancestor != right.ancestor
+        || !left
+            .path
+            .as_os_str()
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(right.path.as_os_str().as_encoded_bytes())
+    {
+        return Ok(false);
+    }
+    probe(&left.ancestor)
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn case_insensitive(directory: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(directory)?;
+    let device = metadata.dev();
+    // A directory's spelling probes its parent's filesystem. Do not infer
+    // a mounted volume's policy from the filesystem containing its mount point.
+    if let Some(parent) = directory.parent()
+        && std::fs::metadata(parent)?.dev() == device
+        && let Some(result) = directory_case_alias(directory, &metadata)?
+    {
+        return Ok(result);
+    }
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        // Files can have separately named hard links; directories cannot.
+        if metadata.is_dir()
+            && metadata.dev() == device
+            && let Some(result) =
+                directory_case_alias(&entry.path(), &metadata)?
+        {
+            return Ok(result);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "could not probe filesystem case aliases without creating a directory",
+    ))
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn directory_case_alias(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> io::Result<Option<bool>> {
+    use std::os::unix::{ffi::OsStringExt, fs::MetadataExt};
+    let Some(name) = path.file_name() else {
+        return Ok(None);
+    };
+    let mut bytes = name.as_encoded_bytes().to_vec();
+    let Some(letter) =
+        bytes.iter_mut().find(|byte| byte.is_ascii_alphabetic())
+    else {
+        return Ok(None);
+    };
+    *letter ^= 0x20;
+    let alias = path.with_file_name(std::ffi::OsString::from_vec(bytes));
+    match std::fs::symlink_metadata(alias) {
+        Ok(alias) => Ok(Some(
+            alias.dev() == metadata.dev() && alias.ino() == metadata.ino(),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Ok(Some(false))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn resolve(path: &Path) -> io::Result<Resolved> {
     let mut ancestor = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -31,10 +122,16 @@ fn resolve(path: &Path) -> io::Result<PathBuf> {
         match std::fs::symlink_metadata(&ancestor) {
             Ok(_) => {
                 let mut resolved = std::fs::canonicalize(&ancestor)?;
+                #[cfg(any(target_os = "macos", test))]
+                let ancestor = resolved.clone();
                 for component in suffix.into_iter().rev() {
                     resolved.push(component);
                 }
-                return Ok(resolved);
+                return Ok(Resolved {
+                    path: resolved,
+                    #[cfg(any(target_os = "macos", test))]
+                    ancestor,
+                });
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let name = ancestor

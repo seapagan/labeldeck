@@ -300,12 +300,13 @@ pub fn run(
     document: Document,
     title: &str,
     live: bool,
+    protected: Option<std::path::PathBuf>,
 ) -> std::io::Result<Option<Document>> {
     let level = ColorizeConfig::color_level(RenderTarget::Stdout);
     let host = super::session::SaveHost::new(
         crate::commands::config_dir()
             .map_err(|error| std::io::Error::other(error.to_string()))?,
-        if live { None } else { Some(title.into()) },
+        protected,
     );
     let result = super::session::run(
         UiState::new(document, title.into(), live, level),
