@@ -35,7 +35,7 @@ pub struct Cli {
 pub enum Command {
     /// Interactively edit an exact deck or a repository's live labels
     #[command(
-        after_help = "Bare edit opens only ./labels.json, never the global deck. --global opens only the global deck; --file PATH opens exactly that existing file. OWNER/REPO edits live labels and requires write authentication. Input and output must be interactive terminals. Nothing is saved until Apply and its confirmation; Cancel discards all edits. Renames preserve issue/PR label associations; live deletions remove them. External changes detected before Apply are refused. Ctrl-Z/Ctrl-Y undo/redo; Ctrl-S opens Apply; Tab selects buttons; Esc cancels a field or exits. Colour previews respect terminal capability and NO_COLOR."
+        after_help = "Bare edit opens only ./labels.json, never the global deck. --global opens only the global deck; --file PATH opens exactly that existing file. OWNER/REPO edits live labels and requires write authentication. Input and output must be interactive terminals. Apply and its confirmation write the source. Save (s) writes the full working deck to Local or Global without clearing history; targets aliasing the file source are disabled. Completed Saves remain after Cancel. Renames preserve issue/PR label associations; live deletions remove them. External changes detected before Apply are refused. Ctrl-Z/Ctrl-Y undo/redo; Ctrl-S opens Apply; Tab selects buttons; Esc cancels a field or exits. Colour previews respect terminal capability and NO_COLOR."
     )]
     Edit {
         /// Repository to edit live, as OWNER/REPO; omit for a local deck.
@@ -56,7 +56,7 @@ pub enum Command {
                       destination, and --file - writes canonical JSON to \
                       standard output. An existing file is never \
                       overwritten without --force (which cannot be \
-                      combined with --file -)."
+                      combined with --file -). --interactive (-i) selects and edits a working copy before confirmed export; it cannot use --file -."
     )]
     Export {
         /// Select and edit a working deck in the terminal before exporting.

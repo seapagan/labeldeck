@@ -109,6 +109,9 @@ Use Undo and Redo for saved edits, additions, and deletions.
 Press Ctrl-S or click Apply to review the confirmation, then choose Apply to
 write your changes. Apply is available in the list after you make changes;
 finish or cancel the form/filter first. Cancel exits without applying them.
+Press `s` or click Save to save the full working deck to Local or Global.
+Save is independent of Apply and preserves undo/redo and the original dirty state.
+A Save target matching the current file source is disabled; Apply owns that file.
 
 | Keys | Action |
 |------|--------|
@@ -168,6 +171,75 @@ labeldeck copy seapagan/template seapagan/new-project --prune --dry-run
 Copy updates the target and leaves the source unchanged. Extra target labels
 remain unless you enable pruning. Use `--dry-run` to preview the changes.
 The same [authentication](#authentication) token must cover both repositories.
+
+### Interactive export, sync, and copy
+
+```console
+labeldeck export OWNER/REPO -i
+labeldeck sync OWNER/REPO --interactive
+labeldeck copy SOURCE TARGET -i
+```
+
+Interactive mode requires terminal input and output, at least 80 columns by 16
+rows. It starts in Select with every candidate checked. Export selects labels;
+sync and copy select CREATE, UPDATE, and DELETE operations. UNCHANGED and RETAIN
+are excluded. An UPDATE preserves the target's current name spelling.
+
+| Select key | Action |
+|------------|--------|
+| Up/Down, PageUp/PageDown | Move between rows |
+| Space | Toggle the current checkbox |
+| `a` / `0` / `i` | Select All / None / Invert |
+| `c` / `u` / `d` | Toggle the entire Create / Update / Delete group |
+| `/` | Filter by name; selections remain intact |
+| `v` | Toggle Selected Only |
+| `w` | Switch to Edit |
+| `f` | Confirm Export, Apply, or Copy |
+| Tab / Shift-Tab | Focus enabled controls |
+| Esc or `q` in Select, Ctrl-C anywhere | Cancel the session |
+
+Controls are clickable. Clicking a checkbox selects and toggles its row; clicking
+elsewhere on a row only selects it. Counts include hidden rows. All, None, Invert,
+and group controls act on the whole candidate set even while filtered. Exporting
+zero selected labels writes an empty deck (`[]`). Sync/copy cannot apply zero
+operations, but Edit remains available.
+
+Edit changes the working copy. It does not write to the repository, sync's loaded
+deck, or copy's SOURCE. Enter, `e`, `n`, Delete, and Ctrl-Z/Y keep their standalone
+edit meanings. Done or list-level Esc validates the full deck and returns to
+Select; Esc in a form discards only that form. Selected Only stays off while
+editing and resumes its previous setting on return. Export keeps selection by
+label identity through edits, deletion/undo, and creation/redo. Sync/copy rebuild
+the normal reconciliation plan and reset all operations to selected on every
+return from Edit. Custom selections require confirmation before entering Edit.
+Working-copy renames do not imply GitHub renames in sync/copy.
+
+In interactive Edit, Ctrl-S or Save opens Save Local / Save Global. Save writes
+the full working deck, including deselected labels, as canonical JSON to
+`./labels.json` or the global default deck. Choosing a Save target authorizes
+its replacement. Save preserves undo/redo and the original dirty state. Sync may
+explicitly Save back to its loaded deck. Export disables any Save destination
+that aliases its final output file, including Save Local for the default export.
+Standalone Edit disables Save destinations that alias its file source. Aliases
+are checked again when saving; filesystem errors are reported.
+
+Final Export, Apply, or Copy needs confirmation. Export retains `--file`,
+`--global`, and `--force` rules, including overwrite protection at write time.
+Interactive export cannot use `--file -`. Interactive sync/copy conflict with
+`--dry-run`; use dry-run for a textual preview. With pruning enabled, selected
+DELETE operations remove labels from existing issues and pull requests.
+Deselected operations are never added back automatically.
+
+After the terminal closes, sync/copy refetch TARGET and compare its name, colour,
+and description content with the reviewed snapshot. Read failure or changed
+content aborts before any mutation and asks you to rerun. This check is not a
+transaction or lock: later races and mutation failures retain normal partial-
+failure reporting. Copy does not refetch SOURCE after opening the session.
+
+Cancel prevents the final export or mutation sequence. Completed Saves remain on
+disk and are reported, including durability warnings, even if the session is
+cancelled or the final action fails. Ctrl-C cannot immediately interrupt a blocking
+filesystem Save.
 
 ### Exit codes
 
