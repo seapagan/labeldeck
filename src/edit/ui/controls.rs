@@ -11,6 +11,7 @@ use ratatui::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Control {
+    Save,
     Undo,
     Redo,
     Apply,
@@ -32,6 +33,15 @@ impl Control {
     ) -> (&'static str, &'static str, Role) {
         use super::ActionGroup;
         match self {
+            Self::Save => (
+                if session == super::SessionKind::Edit {
+                    "s"
+                } else {
+                    "^S"
+                },
+                "Save",
+                Role::Apply,
+            ),
             Self::Undo => ("^Z", "Undo", Role::Undo),
             Self::Redo => ("^Y", "Redo", Role::Redo),
             Self::Apply => ("^S", "Apply", Role::Apply),
@@ -70,16 +80,23 @@ impl UiState {
     pub(super) fn controls(&self) -> Vec<Control> {
         use super::{ActionGroup, SessionKind, WorkspaceMode};
         if self.workspace == WorkspaceMode::Edit {
-            return vec![
-                Control::Undo,
-                Control::Redo,
-                if self.session == SessionKind::Edit {
-                    Control::Apply
-                } else {
-                    Control::Done
-                },
-                Control::Cancel,
-            ];
+            return if self.session == SessionKind::Edit {
+                vec![
+                    Control::Undo,
+                    Control::Redo,
+                    Control::Apply,
+                    Control::Cancel,
+                    Control::Save,
+                ]
+            } else {
+                vec![
+                    Control::Undo,
+                    Control::Redo,
+                    Control::Save,
+                    Control::Done,
+                    Control::Cancel,
+                ]
+            };
         }
         let mut controls = vec![
             Control::All,
@@ -157,6 +174,10 @@ impl UiState {
             if self.workspace == super::WorkspaceMode::Select && index == 4 {
                 x = area.x;
                 y += 1;
+            }
+            if self.session == super::SessionKind::Edit && index == 4 {
+                x = area.right() - 8;
+                y = area.y - 2;
             }
             let (hotkey, name, role) = control.presentation(self.session);
             let focused = self.button == Some(control);

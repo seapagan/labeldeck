@@ -27,27 +27,47 @@ pub fn drive<B: ratatui::backend::Backend>(
     state: &mut UiState,
     mut read: impl FnMut() -> std::io::Result<crossterm::event::Event>,
 ) -> std::io::Result<Option<Document>> {
+    let action = drive_session(terminal, state, &mut read, |_, _| {})?;
+    match action {
+        UiAction::Cancel => Ok(None),
+        UiAction::Apply(document) => Ok(Some(document)),
+        _ => Err(std::io::Error::other(
+            "interactive result requires session driver",
+        )),
+    }
+}
+
+pub fn drive_session<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+    state: &mut UiState,
+    mut read: impl FnMut() -> std::io::Result<crossterm::event::Event>,
+    mut service: impl FnMut(&mut UiState, Option<super::session::SaveTarget>),
+) -> std::io::Result<UiAction> {
     loop {
+        service(state, None);
         terminal
             .draw(|frame| state.render(frame))
             .map_err(|error| std::io::Error::other(error.to_string()))?;
         match state.handle(read()?) {
-            Some(UiAction::Cancel) => return Ok(None),
-            Some(UiAction::Apply(document)) => return Ok(Some(document)),
-            Some(UiAction::Finish(_)) => {
-                return Err(std::io::Error::other(
-                    "interactive result requires session driver",
-                ));
-            }
+            Some(UiAction::Save(target)) => service(state, Some(target)),
+            Some(action) => return Ok(action),
             None => {}
         }
     }
+}
+
+pub(crate) fn run_session(
+    state: &mut UiState,
+    service: impl FnMut(&mut UiState, Option<super::session::SaveTarget>),
+) -> std::io::Result<UiAction> {
+    terminal::run(state, service)
 }
 
 pub enum UiAction {
     Cancel,
     Apply(Document),
     Finish(FinalSelection),
+    Save(super::session::SaveTarget),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,6 +108,7 @@ enum ModalKind {
     Apply(ChangeSummary),
     Finish(FinalSelection),
     Reset,
+    Save,
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +142,9 @@ pub struct UiState {
     selection: Option<Selection>,
     selected_only: bool,
     destination: Option<std::path::PathBuf>,
+    save_choices: [bool; 2],
+    save_paths: [String; 2],
+    saves: Vec<super::session::SaveRecord>,
     title: String,
     live: bool,
     level: ColorLevel,
@@ -152,6 +176,12 @@ impl UiState {
             selection: None,
             selected_only: false,
             destination: None,
+            save_choices: [true; 2],
+            save_paths: [
+                "./labels.json".into(),
+                "<config dir>/labels.json".into(),
+            ],
+            saves: Vec::new(),
             title,
             live,
             level,
@@ -185,6 +215,66 @@ impl UiState {
         let (minimum_width, minimum_height) = self.minimum_size();
         width < minimum_width || height < minimum_height
     }
+    pub fn saves(&self) -> &[super::session::SaveRecord] {
+        &self.saves
+    }
+    pub fn set_status(&mut self, message: String) {
+        self.error = message;
+    }
+    pub fn set_save_choices(
+        &mut self,
+        choices: [bool; 2],
+        paths: [String; 2],
+    ) {
+        self.save_choices = choices;
+        self.save_paths = paths;
+        if let Some(Modal {
+            kind: ModalKind::Save,
+            choice,
+        }) = &mut self.modal
+            && *choice < 2
+            && !choices[*choice]
+        {
+            *choice = 2;
+        }
+    }
+    pub fn record_save(
+        &mut self,
+        result: crate::error::Result<super::session::SaveRecord>,
+    ) {
+        match result {
+            Ok(record) => {
+                self.error = format!(
+                    "Saved {}{}",
+                    record.path.display(),
+                    if record.warning.is_some() {
+                        " (durability unconfirmed)"
+                    } else {
+                        ""
+                    }
+                );
+                self.saves.push(record);
+            }
+            Err(error) => self.error = error.to_string(),
+        }
+    }
+    fn open_save(&mut self) {
+        if self.workspace != WorkspaceMode::Edit
+            || !matches!(self.mode, Mode::List)
+            || self.modal.is_some()
+        {
+            return;
+        }
+        if let Err(error) = self.document.labels() {
+            self.error = error;
+            return;
+        }
+        self.modal = Some(Modal {
+            kind: ModalKind::Save,
+            choice: 2,
+        });
+        self.buttons.clear();
+    }
     pub fn document(&self) -> &Document {
         &self.document
     }
@@ -212,5 +302,22 @@ pub fn run(
     live: bool,
 ) -> std::io::Result<Option<Document>> {
     let level = ColorizeConfig::color_level(RenderTarget::Stdout);
-    terminal::run(UiState::new(document, title.into(), live, level))
+    let host = super::session::SaveHost::new(
+        crate::commands::config_dir()
+            .map_err(|error| std::io::Error::other(error.to_string()))?,
+        if live { None } else { Some(title.into()) },
+    );
+    let result = super::session::run(
+        UiState::new(document, title.into(), live, level),
+        host,
+    );
+    result.report_saves();
+    match result
+        .outcome
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    {
+        UiAction::Cancel => Ok(None),
+        UiAction::Apply(document) => Ok(Some(document)),
+        _ => Err(std::io::Error::other("unexpected editor result")),
+    }
 }

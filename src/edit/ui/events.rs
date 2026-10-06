@@ -78,10 +78,12 @@ impl UiState {
                     return None;
                 }
                 KeyCode::Char('s') => {
-                    if matches!(self.mode, Mode::List)
-                        && self.session == SessionKind::Edit
-                    {
-                        self.confirm();
+                    if matches!(self.mode, Mode::List) {
+                        if self.session == SessionKind::Edit {
+                            self.confirm();
+                        } else if self.workspace == WorkspaceMode::Edit {
+                            self.open_save();
+                        }
                     }
                     return None;
                 }
@@ -159,6 +161,7 @@ impl UiState {
                 self.error.clear();
             }
             KeyCode::Delete => self.delete_selected(),
+            KeyCode::Char('s') => self.open_save(),
             KeyCode::Char('/') => {
                 self.button = None;
                 self.mode = Mode::Filter {
@@ -386,6 +389,7 @@ impl UiState {
             }
             Control::Edit => self.enter_workspace(),
             Control::Done => self.done(),
+            Control::Save => self.open_save(),
             Control::Finish => self.confirm_finish(),
         }
         None

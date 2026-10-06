@@ -18,26 +18,67 @@ impl UiState {
         {
             return None;
         }
-        let modal = self.modal.as_mut()?;
+        self.modal.as_ref()?;
         match key.code {
             KeyCode::Esc => self.dismiss_modal(),
             KeyCode::Tab
             | KeyCode::BackTab
             | KeyCode::Left
-            | KeyCode::Right => modal.choice = 1 - modal.choice,
+            | KeyCode::Right => self.focus_modal(matches!(
+                key.code,
+                KeyCode::BackTab | KeyCode::Left
+            )),
             KeyCode::Enter => return self.choose_modal(),
             _ => {}
         }
         None
     }
+    fn modal_choices(&self) -> Vec<(&'static str, bool)> {
+        match self.modal.as_ref().map(|m| &m.kind) {
+            Some(super::ModalKind::Save) => vec![
+                ("Save Local", self.save_choices[0]),
+                ("Save Global", self.save_choices[1]),
+                ("Back", true),
+            ],
+            Some(super::ModalKind::Reset) => {
+                vec![("Edit", true), ("Back", true)]
+            }
+            Some(super::ModalKind::Finish(super::FinalSelection::Export(
+                _,
+            ))) => vec![("Export", true), ("Back", true)],
+            Some(super::ModalKind::Finish(_))
+                if self.session == super::SessionKind::Copy =>
+            {
+                vec![("Copy", true), ("Back", true)]
+            }
+            _ => vec![("Apply", true), ("Back", true)],
+        }
+    }
+    fn focus_modal(&mut self, back: bool) {
+        let choices = self.modal_choices();
+        let modal = self.modal.as_mut().expect("modal");
+        for _ in 0..choices.len() {
+            modal.choice = if back {
+                (modal.choice + choices.len() - 1) % choices.len()
+            } else {
+                (modal.choice + 1) % choices.len()
+            };
+            if choices[modal.choice].1 {
+                break;
+            }
+        }
+    }
     pub(super) fn choose_modal(&mut self) -> Option<UiAction> {
-        let modal = self.modal.as_ref()?;
-        self.buttons.clear();
-        if modal.choice == 1 {
+        let choice = self.modal.as_ref()?.choice;
+        let choices = self.modal_choices();
+        if !choices.get(choice)?.1 {
+            return None;
+        }
+        if choices[choice].0 == "Back" {
             self.dismiss_modal();
             return None;
         }
-        match &modal.kind {
+        match &self.modal.as_ref()?.kind {
             super::ModalKind::Apply(_) => {
                 Some(UiAction::Apply(self.document.clone()))
             }
@@ -47,6 +88,15 @@ impl UiState {
             super::ModalKind::Reset => {
                 self.edit_workspace();
                 None
+            }
+            super::ModalKind::Save => {
+                let target = if choice == 0 {
+                    crate::edit::session::SaveTarget::Local
+                } else {
+                    crate::edit::session::SaveTarget::Global
+                };
+                self.dismiss_modal();
+                Some(UiAction::Save(target))
             }
         }
     }
@@ -82,7 +132,7 @@ impl UiState {
                 72
             },
         );
-        let (title, action, lines) = self.modal_content(width, &theme);
+        let (title, _action, lines) = self.modal_content(width, &theme);
         let body_height = lines.len() as u16;
         let height = (body_height + 6).min(area.height);
         let rect = Rect::new(
@@ -111,26 +161,39 @@ impl UiState {
                 body_height.min(height.saturating_sub(5)),
             ),
         );
-        let x = rect.x + (width - 20) / 2;
-        self.buttons = vec![
-            Rect::new(x, rect.bottom() - 3, 10, 1),
-            Rect::new(x + 12, rect.bottom() - 3, 8, 1),
-        ];
-        for (i, (text, role)) in [
-            (format!("[ {action} ]"), Role::Apply),
-            ("[ Back ]".into(), Role::Cancel),
-        ]
-        .into_iter()
-        .enumerate()
+        let choices = self.modal_choices();
+        let save = matches!(modal.kind, super::ModalKind::Save);
+        let texts: Vec<_> = choices
+            .iter()
+            .map(|(name, _)| {
+                if save {
+                    format!("[{name}]")
+                } else {
+                    format!("[ {name} ]")
+                }
+            })
+            .collect();
+        let total = texts.iter().map(|t| t.len() as u16).sum::<u16>()
+            + 2 * (texts.len() as u16 - 1);
+        let mut x = rect.x + (width.saturating_sub(total)) / 2;
+        self.buttons.clear();
+        for (i, (text, (_, enabled))) in
+            texts.into_iter().zip(choices).enumerate()
         {
+            let button = Rect::new(x, rect.bottom() - 3, text.len() as u16, 1);
             frame.render_widget(
-                Paragraph::new(text)
-                    .alignment(HorizontalAlignment::Center)
-                    .style(theme.button(role, true, modal.choice == i)),
-                self.buttons[i],
+                Paragraph::new(text).style(theme.button(
+                    if i == 0 { Role::Apply } else { Role::Cancel },
+                    enabled,
+                    modal.choice == i,
+                )),
+                button,
             );
+            self.buttons.push(button);
+            x = button.right() + 2;
         }
     }
+
     fn modal_content(
         &self,
         width: u16,
@@ -145,6 +208,15 @@ impl UiState {
                     summary: summary.clone(),
                 }
                 .lines(width, theme, self.live),
+            ),
+            ModalKind::Save => (
+                "Save working deck",
+                "Save",
+                vec![
+                    Line::from("Save full deck; overwrite selected file."),
+                    Line::from(super::render::clean(&self.save_paths[0])),
+                    Line::from(super::render::clean(&self.save_paths[1])),
+                ],
             ),
             ModalKind::Reset => (
                 "Edit working deck",

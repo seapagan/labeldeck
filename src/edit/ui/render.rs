@@ -338,7 +338,13 @@ impl UiState {
             Paragraph::new("Filter: ").style(theme.style(Role::Filter)),
             Rect::new(area.x, area.y, 8, 1),
         );
-        let width = area.width - 8;
+        let width = area.width
+            - 8
+            - if self.session == SessionKind::Edit {
+                10
+            } else {
+                0
+            };
         let input = if let Mode::Filter { input, .. } = &self.mode {
             Some(input)
         } else {

@@ -283,3 +283,92 @@ fn each_session_uses_shared_size_requirement_for_render_and_resize() {
         assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
     }
 }
+
+#[test]
+fn interactive_control_s_opens_save_choices_only_at_list_level() {
+    let mut ui = export();
+    key(&mut ui, KeyCode::Char('w'));
+    ctrl(&mut ui, 's');
+    let text = screen(&mut ui, 80, 24);
+    assert!(text.contains("Save Local") && text.contains("Save Global"));
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Enter);
+    ctrl(&mut ui, 's');
+    assert!(!screen(&mut ui, 80, 24).contains("Save working deck"));
+}
+
+#[test]
+fn completed_save_survives_cancel_and_event_read_failure() {
+    use labeldeck::edit::{
+        session::{SaveHost, SaveTarget},
+        ui::drive_session,
+    };
+    use ratatui::{Terminal, backend::TestBackend};
+    for fail in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let host = SaveHost {
+            local: dir.path().join("labels.json"),
+            config_dir: dir.path().join("config"),
+            protected: None,
+        };
+        let mut ui = export();
+        key(&mut ui, KeyCode::Char('0'));
+        key(&mut ui, KeyCode::Char('w'));
+        host.service(&mut ui, Some(SaveTarget::Local));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let result = drive_session(
+            &mut terminal,
+            &mut ui,
+            || {
+                if fail {
+                    Err(std::io::Error::other("input failure"))
+                } else {
+                    Ok(crossterm::event::Event::Key(
+                        crossterm::event::KeyEvent::new(
+                            KeyCode::Char('c'),
+                            crossterm::event::KeyModifiers::CONTROL,
+                        ),
+                    ))
+                }
+            },
+            |state, request| host.service(state, request),
+        );
+        assert_eq!(result.is_err(), fail);
+        assert_eq!(ui.saves().len(), 1);
+        assert_eq!(
+            labeldeck::canonical::parse(
+                &std::fs::read_to_string(&host.local).unwrap()
+            )
+            .unwrap()
+            .len(),
+            2
+        );
+        assert!(!ui.document().can_undo());
+    }
+}
+
+#[test]
+fn standalone_same_source_save_choice_is_disabled() {
+    use labeldeck::edit::session::SaveHost;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("labels.json");
+    std::fs::write(&path, "[]").unwrap();
+    let host = SaveHost {
+        local: path.clone(),
+        config_dir: dir.path().join("config"),
+        protected: Some(path),
+    };
+    let mut ui = UiState::new(
+        Document::from_labels(vec![label("bug")]),
+        "deck".into(),
+        false,
+        ColorLevel::NoColor,
+    );
+    host.refresh(&mut ui);
+    key(&mut ui, KeyCode::Char('s'));
+    key(&mut ui, KeyCode::Tab);
+    assert!(matches!(
+        key(&mut ui, KeyCode::Enter),
+        Some(UiAction::Save(labeldeck::edit::session::SaveTarget::Global))
+    ));
+}
