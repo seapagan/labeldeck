@@ -59,6 +59,9 @@ pub enum Command {
                       combined with --file -)."
     )]
     Export {
+        /// Select and edit a working deck in the terminal before exporting.
+        #[arg(short = 'i', long)]
+        interactive: bool,
         /// Repository to export, as OWNER/REPO.
         repo: String,
         /// Output file (default: ./labels.json; '-' writes standard output).

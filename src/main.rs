@@ -14,17 +14,19 @@ fn main() {
             cli.no_proxy,
         ),
         Command::Export {
+            interactive,
             repo,
             file,
             force,
             global,
-        } => commands::export::run(
-            &repo,
-            file.as_ref(),
-            force,
-            global,
-            cli.no_proxy,
-        ),
+        } => {
+            let run = if interactive {
+                commands::export::run_interactive
+            } else {
+                commands::export::run
+            };
+            run(&repo, file.as_ref(), force, global, cli.no_proxy)
+        }
         Command::Diff {
             repo,
             file,
