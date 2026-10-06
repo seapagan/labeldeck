@@ -1578,3 +1578,31 @@ fn interactive_sync_accepts_both_forms_and_conflicts_with_dry_run() {
         );
     }
 }
+
+#[test]
+fn interactive_copy_accepts_both_forms_and_conflicts_with_dry_run() {
+    use clap::Parser;
+    for flag in ["-i", "--interactive"] {
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "copy",
+                "o/source",
+                "o/target",
+                flag
+            ])
+            .is_ok()
+        );
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "copy",
+                "o/source",
+                "o/target",
+                flag,
+                "--dry-run"
+            ])
+            .is_err()
+        );
+    }
+}

@@ -138,6 +138,9 @@ pub enum Command {
                       plan without changing anything."
     )]
     Copy {
+        /// Select reconciliation operations and edit a SOURCE-derived working deck.
+        #[arg(short = 'i', long, conflicts_with = "dry_run")]
+        interactive: bool,
         /// Repository whose labels are copied, as OWNER/REPO.
         source: String,
         /// Repository the labels are applied to, as OWNER/REPO.

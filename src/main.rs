@@ -60,18 +60,26 @@ fn main() {
             )
         }
         Command::Copy {
+            interactive,
             source,
             target,
             prune,
             no_prune,
             dry_run,
-        } => commands::copy::run(
-            &source,
-            &target,
-            labeldeck::cli::prune_override(prune, no_prune),
-            dry_run,
-            cli.no_proxy,
-        ),
+        } => {
+            let run = if interactive {
+                commands::copy::run_interactive
+            } else {
+                commands::copy::run
+            };
+            run(
+                &source,
+                &target,
+                labeldeck::cli::prune_override(prune, no_prune),
+                dry_run,
+                cli.no_proxy,
+            )
+        }
         Command::Auth(auth) => match auth {
             AuthCommand::Login { token_stdin } => {
                 commands::auth::login(token_stdin, cli.no_proxy)

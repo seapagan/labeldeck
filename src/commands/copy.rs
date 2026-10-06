@@ -21,13 +21,7 @@ pub fn run(
 ) -> Result<i32> {
     let source = repo_spec(source)?;
     let target = repo_spec(target)?;
-    if is_same_repository(&source, &target) {
-        return Err(Error::Usage(format!(
-            "source and target are the same repository ({}/{}); \
-             `labeldeck copy` needs two different repositories",
-            source.owner, source.name
-        )));
-    }
+    reject_same_repository(&source, &target)?;
 
     let config_dir = config_dir()?;
     let config = crate::config::load(&config_dir)?;
@@ -60,6 +54,78 @@ pub fn run(
             source.owner, source.name, target.owner, target.name
         ),
     )
+}
+
+/// Interactive copy never writes or refetches SOURCE after its initial snapshot.
+pub fn run_interactive(
+    source: &str,
+    target: &str,
+    cli_prune: Option<bool>,
+    dry_run: bool,
+    no_proxy: bool,
+) -> Result<i32> {
+    let source = repo_spec(source)?;
+    let target = repo_spec(target)?;
+    reject_same_repository(&source, &target)?;
+    if dry_run {
+        return Err(Error::Usage(
+            "--interactive conflicts with --dry-run".into(),
+        ));
+    }
+    crate::edit::session::require_terminal("copy --interactive")?;
+    let config_dir = config_dir()?;
+    let config = crate::config::load(&config_dir)?;
+    let prune = crate::config::effective_prune(cli_prune, &config);
+    let client = client_for(&config_dir, false, no_proxy)?;
+    interactive_with(
+        &client,
+        &source,
+        &target,
+        prune,
+        &config_dir,
+        crate::edit::session::run,
+    )
+}
+
+pub fn interactive_with(
+    client: &GitHubClient,
+    source: &RepoSpec,
+    target: &RepoSpec,
+    prune: bool,
+    config_dir: &std::path::Path,
+    driver: impl FnOnce(
+        crate::edit::ui::UiState,
+        crate::edit::session::SaveHost,
+    ) -> crate::edit::session::SessionResult,
+) -> Result<i32> {
+    reject_same_repository(source, target)?;
+    let desired = fetch_labels(client, "source", source)?;
+    let context = super::interactive::ReconcileContext {
+        session: crate::edit::ui::SessionKind::Copy,
+        prune,
+        title: format!(
+            "{}/{} -> {}/{}",
+            source.owner, source.name, target.owner, target.name
+        ),
+        success_line: format!(
+            "Copied labels from {}/{} to {}/{}",
+            source.owner, source.name, target.owner, target.name
+        ),
+        config_dir: config_dir.into(),
+    };
+    super::interactive::reconcile_with(
+        client, target, desired, context, driver,
+    )
+}
+
+fn reject_same_repository(source: &RepoSpec, target: &RepoSpec) -> Result<()> {
+    if is_same_repository(source, target) {
+        return Err(Error::Usage(format!(
+            "source and target are the same repository ({}/{}); `labeldeck copy` needs two different repositories",
+            source.owner, source.name
+        )));
+    }
+    Ok(())
 }
 
 /// Build the client a copy runs with.

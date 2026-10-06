@@ -239,3 +239,46 @@ fn sync_explicit_save_can_overwrite_its_loaded_source() {
     );
     mock.assert_satisfied();
 }
+
+#[test]
+fn copy_only_reads_source_once_and_mutates_selected_target_operations() {
+    let mock = mock_github(vec![
+        Expectation::get("/repos/o/source/labels?per_page=100")
+            .labels_page(&labels_json(&[("new", "ededed", Some(""))]), None),
+        page(&[("old", "ededed", Some(""))]),
+        page(&[("old", "ededed", Some(""))]),
+        Expectation::post("/repos/o/r/labels"),
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = GitHubClient::with_options(mock.base_url(), None, true);
+    let code = labeldeck::commands::copy::interactive_with(
+        &client,
+        &RepoSpec::parse("o/source").unwrap(),
+        &RepoSpec::parse("o/r").unwrap(),
+        true,
+        root.path(),
+        |mut state, _| {
+            assert_eq!(state.session(), SessionKind::Copy);
+            key(&mut state, KeyCode::Char('d'));
+            SessionResult {
+                outcome: Ok(UiAction::Finish(FinalSelection::Plan(
+                    state.selected_plan(),
+                ))),
+                saves: Vec::new(),
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(mock.requests().len(), 4);
+    mock.assert_satisfied();
+}
+
+#[test]
+fn same_repository_copy_rejection_precedes_terminal_check() {
+    let error = labeldeck::commands::copy::run_interactive(
+        "o/r", "O/R", None, false, true,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("same repository"));
+}
