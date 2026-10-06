@@ -47,3 +47,12 @@ fn missing_final_component_case_aliases_match() {
         .unwrap()
     );
 }
+
+#[test]
+fn final_case_alias_comparison_respects_existing_filesystem() {
+    let dir = tempfile::tempdir().unwrap();
+    let lower = dir.path().join("labels.json");
+    let upper = dir.path().join("LABELS.JSON");
+    std::fs::write(&lower, "[]").unwrap();
+    assert_eq!(same_destination(&lower, &upper).unwrap(), upper.exists());
+}

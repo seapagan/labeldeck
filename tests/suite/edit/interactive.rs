@@ -372,3 +372,118 @@ fn standalone_same_source_save_choice_is_disabled() {
         Some(UiAction::Save(labeldeck::edit::session::SaveTarget::Global))
     ));
 }
+
+#[test]
+fn mixed_create_group_toggle_selects_all_then_deselects_all() {
+    let mut ui = UiState::reconcile(
+        Document::from_labels(vec![label("a"), label("b")]),
+        "target".into(),
+        labeldeck::edit::ui::SessionKind::Copy,
+        vec![],
+        false,
+        ColorLevel::NoColor,
+    )
+    .unwrap();
+    key(&mut ui, KeyCode::Char(' '));
+    key(&mut ui, KeyCode::Char('c'));
+    assert_eq!(ui.selected_plan().creates.len(), 2);
+    key(&mut ui, KeyCode::Char('c'));
+    assert!(ui.selected_plan().is_empty());
+}
+
+#[test]
+fn sync_edit_renames_reconcile_by_name_without_editor_rename_inference() {
+    let mut ui = UiState::reconcile(
+        Document::from_labels(vec![label("bug")]),
+        "target".into(),
+        labeldeck::edit::ui::SessionKind::Sync,
+        vec![label("bug")],
+        true,
+        ColorLevel::NoColor,
+    )
+    .unwrap();
+    key(&mut ui, KeyCode::Char('w'));
+    key(&mut ui, KeyCode::Enter);
+    super::form::replace(&mut ui, "BUG");
+    key(&mut ui, KeyCode::Enter);
+    key(&mut ui, KeyCode::Esc);
+    assert!(ui.selected_plan().is_empty());
+    key(&mut ui, KeyCode::Char('w'));
+    key(&mut ui, KeyCode::Enter);
+    super::form::replace(&mut ui, "new");
+    key(&mut ui, KeyCode::Enter);
+    key(&mut ui, KeyCode::Esc);
+    assert_eq!(ui.selected_plan().creates[0].name, "new");
+    assert_eq!(ui.selected_plan().deletes[0].name, "bug");
+}
+
+#[test]
+fn checkbox_click_after_scroll_uses_ratatui_table_offset() {
+    use super::rendering::{click, draw, locate};
+    let mut ui = UiState::export(
+        Document::from_labels(
+            (0..50).map(|i| label(&format!("item-{i:02}"))).collect(),
+        ),
+        "source".into(),
+        "out.json".into(),
+        ColorLevel::NoColor,
+    );
+    for _ in 0..30 {
+        key(&mut ui, KeyCode::Down);
+    }
+    let buffer = draw(&mut ui, 80, 16);
+    let (_, y) = locate(&buffer, "item-30");
+    click(&mut ui, 2, y);
+    assert_eq!(ui.selected(), Some(30));
+    assert_eq!(ui.selected_labels().unwrap().len(), 49);
+    assert!(
+        !ui.selected_labels()
+            .unwrap()
+            .iter()
+            .any(|l| l.name == "item-30")
+    );
+}
+
+#[test]
+fn disabled_finish_click_noops_and_focus_skips_disabled_controls() {
+    use super::rendering::{click, draw, locate};
+    let mut ui = reconcile();
+    key(&mut ui, KeyCode::Char('0'));
+    let buffer = draw(&mut ui, 80, 24);
+    let (x, y) = locate(&buffer, "[f Apply]");
+    assert!(click(&mut ui, x, y).is_none());
+    assert!(!screen(&mut ui, 80, 24).contains("Confirm Apply"));
+    key(&mut ui, KeyCode::BackTab);
+    let buffer = draw(&mut ui, 80, 24);
+    assert!(
+        buffer[locate(&buffer, "[^C Cancel]")]
+            .modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
+}
+
+#[test]
+fn save_preserves_dirty_and_undo_redo_while_recording_failures() {
+    use labeldeck::edit::session::{SaveHost, SaveTarget};
+    let root = tempfile::tempdir().unwrap();
+    let host = SaveHost {
+        local: root.path().join("labels.json"),
+        config_dir: root.path().join("config"),
+        protected: None,
+    };
+    let mut ui = export();
+    key(&mut ui, KeyCode::Char('w'));
+    key(&mut ui, KeyCode::Delete);
+    host.service(&mut ui, Some(SaveTarget::Local));
+    assert!(screen(&mut ui, 80, 24).contains(" *"));
+    assert!(ui.document().can_undo());
+    ctrl(&mut ui, 'z');
+    assert!(ui.document().can_redo());
+    host.service(&mut ui, Some(SaveTarget::Global));
+    assert!(ui.document().can_redo());
+    ui.record_save(Err(labeldeck::error::Error::Usage(
+        "injected failure".into(),
+    )));
+    assert_eq!(ui.saves().len(), 2);
+    assert!(screen(&mut ui, 80, 24).contains("injected failure"));
+}

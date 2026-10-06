@@ -45,7 +45,15 @@ impl Control {
             Self::Undo => ("^Z", "Undo", Role::Undo),
             Self::Redo => ("^Y", "Redo", Role::Redo),
             Self::Apply => ("^S", "Apply", Role::Apply),
-            Self::Cancel => ("Esc", "Cancel", Role::Cancel),
+            Self::Cancel => (
+                if session == super::SessionKind::Edit {
+                    "Esc"
+                } else {
+                    "^C"
+                },
+                "Cancel",
+                Role::Cancel,
+            ),
             Self::All => ("a", "All", Role::Apply),
             Self::None => ("0", "None", Role::Apply),
             Self::Invert => ("i", "Invert", Role::Apply),
@@ -188,7 +196,14 @@ impl UiState {
                     hotkey,
                     theme.button(Role::KeyHint, enabled, focused),
                 ),
-                Span::raw(format!(" {name}]")),
+                Span::raw(format!(
+                    " {name}{}]",
+                    if control == Control::SelectedOnly && self.selected_only {
+                        " On"
+                    } else {
+                        ""
+                    }
+                )),
             ]);
             let rect = Rect::new(x, y, line.width() as u16, 1);
             frame.render_widget(

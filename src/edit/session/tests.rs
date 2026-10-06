@@ -135,3 +135,21 @@ fn first_global_save_secures_config_directory() {
         0o700
     );
 }
+
+#[test]
+fn non_directory_save_parent_reports_error_without_recording_success() {
+    let root = tempfile::tempdir().unwrap();
+    let mut host = host(root.path());
+    std::fs::write(host.config_dir.parent().unwrap(), "file").unwrap();
+    host.protected = Some(root.path().join("protected.json"));
+    let mut ui = crate::edit::ui::UiState::new(
+        document(),
+        "deck".into(),
+        false,
+        colored_text::ColorLevel::NoColor,
+    );
+    host.refresh(&mut ui);
+    host.service(&mut ui, Some(SaveTarget::Global));
+    assert!(ui.saves().is_empty());
+    assert!(!host.config_dir.exists());
+}

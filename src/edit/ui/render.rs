@@ -224,10 +224,56 @@ impl UiState {
     ) -> Table<'static> {
         let selecting = self.workspace == WorkspaceMode::Select;
         let candidates = self.candidates();
-        let drafts: Vec<_> = visible
+        let drafts = self.table_drafts(visible, &candidates);
+        let (widths, header) = self.table_columns(&drafts, width);
+        let rows: Vec<_> = visible
+            .iter()
+            .zip(&drafts)
+            .map(|(id, draft)| {
+                let mut cells = self.label_cells(draft, theme);
+                if selecting
+                    && let Some(row) = candidates.iter().find(|r| r.id == *id)
+                {
+                    cells.insert(
+                        0,
+                        Cell::from(if row.checked { "[x]" } else { "[ ]" }),
+                    );
+                    if let Some(group) = row.group {
+                        cells.insert(
+                            1,
+                            Cell::from(match group {
+                                super::ActionGroup::Create => "CREATE",
+                                super::ActionGroup::Update => "UPDATE",
+                                super::ActionGroup::Delete => "DELETE",
+                            }),
+                        );
+                    }
+                }
+                Row::new(cells)
+            })
+            .collect();
+        Table::new(rows, widths)
+            .column_spacing(2)
+            .highlight_spacing(HighlightSpacing::Always)
+            .header(
+                Row::new(header)
+                    .style(theme.style(Role::Header))
+                    .bottom_margin(1),
+            )
+            .style(theme.style(Role::DetailValue))
+            .row_highlight_style(theme.style(Role::Selected))
+            .highlight_symbol("> ")
+    }
+
+    fn table_drafts(
+        &self,
+        visible: &[crate::edit::model::EntryId],
+        candidates: &[super::selection::Candidate],
+    ) -> Vec<crate::edit::model::Draft> {
+        visible
             .iter()
             .filter_map(|id| {
-                if selecting {
+                if self.workspace == WorkspaceMode::Select {
                     candidates
                         .iter()
                         .find(|r| r.id == *id)
@@ -240,7 +286,14 @@ impl UiState {
                         .map(|e| e.draft.clone())
                 }
             })
-            .collect();
+            .collect()
+    }
+    fn table_columns(
+        &self,
+        drafts: &[crate::edit::model::Draft],
+        width: u16,
+    ) -> (Vec<Constraint>, Vec<&'static str>) {
+        let selecting = self.workspace == WorkspaceMode::Select;
         let extra = if selecting {
             if self.session == SessionKind::Export {
                 5
@@ -279,43 +332,7 @@ impl UiState {
                 header.insert(1, "ACTION");
             }
         }
-        let rows: Vec<_> = visible
-            .iter()
-            .zip(&drafts)
-            .map(|(id, draft)| {
-                let mut cells = self.label_cells(draft, theme);
-                if selecting
-                    && let Some(row) = candidates.iter().find(|r| r.id == *id)
-                {
-                    cells.insert(
-                        0,
-                        Cell::from(if row.checked { "[x]" } else { "[ ]" }),
-                    );
-                    if let Some(group) = row.group {
-                        cells.insert(
-                            1,
-                            Cell::from(match group {
-                                super::ActionGroup::Create => "CREATE",
-                                super::ActionGroup::Update => "UPDATE",
-                                super::ActionGroup::Delete => "DELETE",
-                            }),
-                        );
-                    }
-                }
-                Row::new(cells)
-            })
-            .collect();
-        Table::new(rows, widths)
-            .column_spacing(2)
-            .highlight_spacing(HighlightSpacing::Always)
-            .header(
-                Row::new(header)
-                    .style(theme.style(Role::Header))
-                    .bottom_margin(1),
-            )
-            .style(theme.style(Role::DetailValue))
-            .row_highlight_style(theme.style(Role::Selected))
-            .highlight_symbol("> ")
+        (widths, header)
     }
 
     fn label_cells(

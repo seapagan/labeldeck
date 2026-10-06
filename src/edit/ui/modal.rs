@@ -120,9 +120,9 @@ impl UiState {
         self.buttons.clear();
     }
     pub(super) fn render_modal(&mut self, frame: &mut Frame) {
-        let Some(modal) = &self.modal else {
+        if self.modal.is_none() {
             return;
-        };
+        }
         let theme = UiTheme::new(self.level, false);
         let area = frame.area();
         let width = area.width.saturating_sub(4).min(
@@ -161,6 +161,17 @@ impl UiState {
                 body_height.min(height.saturating_sub(5)),
             ),
         );
+        self.render_modal_buttons(frame, rect, &theme);
+    }
+
+    fn render_modal_buttons(
+        &mut self,
+        frame: &mut Frame,
+        rect: Rect,
+        theme: &UiTheme,
+    ) {
+        let modal = self.modal.as_ref().expect("modal");
+        let width = rect.width;
         let choices = self.modal_choices();
         let save = matches!(modal.kind, super::ModalKind::Save);
         let texts: Vec<_> = choices
@@ -199,7 +210,7 @@ impl UiState {
         width: u16,
         theme: &UiTheme,
     ) -> (&'static str, &'static str, Vec<Line<'static>>) {
-        use super::{FinalSelection, ModalKind};
+        use super::ModalKind;
         match &self.modal.as_ref().expect("modal").kind {
             ModalKind::Apply(summary) => (
                 "Confirm Apply",
@@ -225,7 +236,20 @@ impl UiState {
                     "Editing will rebuild the plan and reset operation selections.",
                 )],
             ),
-            ModalKind::Finish(FinalSelection::Export(labels)) => (
+            ModalKind::Finish(payload) => {
+                self.finish_content(payload, width, theme)
+            }
+        }
+    }
+    fn finish_content(
+        &self,
+        payload: &super::FinalSelection,
+        width: u16,
+        theme: &UiTheme,
+    ) -> (&'static str, &'static str, Vec<Line<'static>>) {
+        use super::FinalSelection;
+        match payload {
+            FinalSelection::Export(labels) => (
                 "Confirm Export",
                 "Export",
                 vec![
@@ -240,7 +264,7 @@ impl UiState {
                     )),
                 ],
             ),
-            ModalKind::Finish(FinalSelection::Plan(plan)) => {
+            FinalSelection::Plan(plan) => {
                 let summary = crate::edit::plan::ChangeSummary {
                     created: plan.creates.len(),
                     updated: plan.updates.len(),
