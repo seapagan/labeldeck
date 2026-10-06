@@ -208,9 +208,9 @@ fn modified_modal_enter_never_activates_either_choice() {
             let mut ui = state();
             ui.delete_selected();
             ui.confirm();
-            apply_modal(&mut ui).apply = apply;
+            ui.modal.as_mut().unwrap().choice = usize::from(!apply);
             assert!(key(&mut ui, KeyCode::Enter, modifiers).is_none());
-            assert_eq!(apply_modal(&mut ui).apply, apply);
+            assert_eq!((ui.modal.as_ref().unwrap().choice == 0), apply);
         }
     }
 }
@@ -232,9 +232,9 @@ fn modified_modal_navigation_preserves_focus_and_confirmation() {
             ui.delete_selected();
             ui.confirm();
             for apply in [false, true] {
-                apply_modal(&mut ui).apply = apply;
+                ui.modal.as_mut().unwrap().choice = usize::from(!apply);
                 assert!(key(&mut ui, code, modifiers).is_none());
-                assert_eq!(apply_modal(&mut ui).apply, apply);
+                assert_eq!((ui.modal.as_ref().unwrap().choice == 0), apply);
             }
         }
     }
@@ -247,10 +247,10 @@ fn shift_backtab_navigates_modal_and_control_c_still_cancels() {
     ui.confirm();
     assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
     key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(apply_modal(&mut ui).apply);
+    assert!((ui.modal.as_ref().unwrap().choice == 0));
     assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
     key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(!apply_modal(&mut ui).apply);
+    assert!(!(ui.modal.as_ref().unwrap().choice == 0));
     assert!(key(&mut ui, KeyCode::Enter, KeyModifiers::NONE).is_none());
     assert!(ui.modal.is_none());
 }
@@ -264,9 +264,9 @@ fn apply_button_delegates_no_changes_and_confirmation_to_confirm() {
     ui.delete_selected();
     assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.error.is_empty());
-    assert!(!apply_modal(&mut ui).apply);
+    assert!(!(ui.modal.as_ref().unwrap().choice == 0));
     assert!(ui.activate(Control::Apply).is_none());
-    assert!(!apply_modal(&mut ui).apply);
+    assert!(!(ui.modal.as_ref().unwrap().choice == 0));
 }
 
 #[test]
@@ -356,9 +356,4 @@ fn focus_skips_unavailable_history_and_apply() {
         key(&mut ui, KeyCode::Enter, KeyModifiers::NONE),
         Some(UiAction::Cancel)
     ));
-}
-
-fn apply_modal(ui: &mut UiState) -> &mut ConfirmApply {
-    let Modal::Apply(modal) = ui.modal.as_mut().unwrap();
-    modal
 }

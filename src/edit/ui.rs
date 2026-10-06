@@ -1,5 +1,8 @@
 //! Small terminal editor with independently testable rendering and events.
 
+mod selection;
+pub use selection::ActionGroup;
+use selection::Selection;
 mod controls;
 use controls::Control;
 mod events;
@@ -31,6 +34,11 @@ pub fn drive<B: ratatui::backend::Backend>(
         match state.handle(read()?) {
             Some(UiAction::Cancel) => return Ok(None),
             Some(UiAction::Apply(document)) => return Ok(Some(document)),
+            Some(UiAction::Finish(_)) => {
+                return Err(std::io::Error::other(
+                    "interactive result requires session driver",
+                ));
+            }
             None => {}
         }
     }
@@ -39,6 +47,7 @@ pub fn drive<B: ratatui::backend::Backend>(
 pub enum UiAction {
     Cancel,
     Apply(Document),
+    Finish(FinalSelection),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,8 +80,20 @@ enum Mode {
     Filter { before: String, input: Input },
 }
 
-enum Modal {
-    Apply(ConfirmApply),
+struct Modal {
+    kind: ModalKind,
+    choice: usize,
+}
+enum ModalKind {
+    Apply(ChangeSummary),
+    Finish(FinalSelection),
+    Reset,
+}
+
+#[derive(Debug, Clone)]
+pub enum FinalSelection {
+    Export(Vec<crate::labels::Label>),
+    Plan(crate::plan::Plan),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,13 +112,15 @@ pub enum WorkspaceMode {
 
 struct ConfirmApply {
     summary: ChangeSummary,
-    apply: bool,
 }
 
 pub struct UiState {
     document: Document,
     session: SessionKind,
     workspace: WorkspaceMode,
+    selection: Option<Selection>,
+    selected_only: bool,
+    destination: Option<std::path::PathBuf>,
     title: String,
     live: bool,
     level: ColorLevel,
@@ -126,6 +149,9 @@ impl UiState {
             document,
             session: SessionKind::Edit,
             workspace: WorkspaceMode::Edit,
+            selection: None,
+            selected_only: false,
+            destination: None,
             title,
             live,
             level,
@@ -152,7 +178,7 @@ impl UiState {
         if self.session == SessionKind::Edit {
             (48, 16)
         } else {
-            (60, 16)
+            (80, 16)
         }
     }
     fn too_small(&self, width: u16, height: u16) -> bool {
@@ -166,13 +192,14 @@ impl UiState {
         self.selected
     }
     fn repair_selection(&mut self) {
+        self.remember_entries();
         if let Mode::Edit(form) = &self.mode {
             if let Some(id) = form.id {
                 self.selected = Some(id);
             }
             return;
         }
-        let visible = visible_ids(&self.document, &self.filter);
+        let visible = self.visible();
         if self.selected.is_none_or(|id| !visible.contains(&id)) {
             self.selected = visible.first().copied();
         }

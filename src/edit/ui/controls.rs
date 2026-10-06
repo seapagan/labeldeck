@@ -15,23 +15,116 @@ pub(super) enum Control {
     Redo,
     Apply,
     Cancel,
+    All,
+    None,
+    Invert,
+    SelectedOnly,
+    Edit,
+    Done,
+    Finish,
+    Group(super::ActionGroup),
+}
+
+impl Control {
+    pub(super) fn presentation(
+        self,
+        session: super::SessionKind,
+    ) -> (&'static str, &'static str, Role) {
+        use super::ActionGroup;
+        match self {
+            Self::Undo => ("^Z", "Undo", Role::Undo),
+            Self::Redo => ("^Y", "Redo", Role::Redo),
+            Self::Apply => ("^S", "Apply", Role::Apply),
+            Self::Cancel => ("Esc", "Cancel", Role::Cancel),
+            Self::All => ("a", "All", Role::Apply),
+            Self::None => ("0", "None", Role::Apply),
+            Self::Invert => ("i", "Invert", Role::Apply),
+            Self::SelectedOnly => ("v", "Selected Only", Role::Apply),
+            Self::Edit => ("w", "Edit", Role::Apply),
+            Self::Done => ("Esc", "Done", Role::Apply),
+            Self::Group(ActionGroup::Create) => ("c", "Create", Role::Apply),
+            Self::Group(ActionGroup::Update) => ("u", "Update", Role::Apply),
+            Self::Group(ActionGroup::Delete) => ("d", "Delete", Role::Cancel),
+            Self::Finish => (
+                "f",
+                match session {
+                    super::SessionKind::Export => "Export",
+                    super::SessionKind::Copy => "Copy",
+                    _ => "Apply",
+                },
+                Role::Apply,
+            ),
+        }
+    }
+    pub(super) fn hotkey_code(self) -> Option<crossterm::event::KeyCode> {
+        let hotkey = self.presentation(super::SessionKind::Edit).0;
+        if hotkey.len() == 1 {
+            Some(crossterm::event::KeyCode::Char(hotkey.chars().next()?))
+        } else {
+            None
+        }
+    }
 }
 
 impl UiState {
     pub(super) fn controls(&self) -> Vec<Control> {
-        vec![
-            Control::Undo,
-            Control::Redo,
-            Control::Apply,
-            Control::Cancel,
-        ]
+        use super::{ActionGroup, SessionKind, WorkspaceMode};
+        if self.workspace == WorkspaceMode::Edit {
+            return vec![
+                Control::Undo,
+                Control::Redo,
+                if self.session == SessionKind::Edit {
+                    Control::Apply
+                } else {
+                    Control::Done
+                },
+                Control::Cancel,
+            ];
+        }
+        let mut controls = vec![
+            Control::All,
+            Control::None,
+            Control::Invert,
+            Control::SelectedOnly,
+        ];
+        if self.session != SessionKind::Export {
+            controls.extend([
+                Control::Group(ActionGroup::Create),
+                Control::Group(ActionGroup::Update),
+                Control::Group(ActionGroup::Delete),
+            ]);
+        }
+        controls.extend([Control::Edit, Control::Finish, Control::Cancel]);
+        controls
     }
     pub(super) fn enabled(&self, control: Control) -> bool {
+        let list =
+            matches!(self.mode, super::Mode::List) && self.modal.is_none();
         match control {
-            Control::Undo => self.document.can_undo(),
-            Control::Redo => self.document.can_redo(),
+            Control::Undo => {
+                self.workspace == super::WorkspaceMode::Edit
+                    && self.document.can_undo()
+            }
+            Control::Redo => {
+                self.workspace == super::WorkspaceMode::Edit
+                    && self.document.can_redo()
+            }
             Control::Apply => self.apply_available(),
             Control::Cancel => true,
+            Control::Group(group) => {
+                list && self
+                    .candidates()
+                    .iter()
+                    .any(|r| r.group == Some(group))
+            }
+            Control::All | Control::None | Control::Invert => {
+                list && !self.candidates().is_empty()
+            }
+            Control::Finish => {
+                list && (self.session == super::SessionKind::Export
+                    || !self.selected_plan().is_empty())
+            }
+            _ => list,
         }
     }
     pub(super) fn focus_control(&mut self, back: bool) {
@@ -52,7 +145,6 @@ impl UiState {
             }
         }
     }
-
     pub(super) fn render_footer(
         &mut self,
         frame: &mut Frame,
@@ -60,13 +152,13 @@ impl UiState {
         theme: &UiTheme,
     ) {
         let mut x = area.x;
-        for control in self.controls() {
-            let (hotkey, name, role) = match control {
-                Control::Undo => ("^Z", "Undo", Role::Undo),
-                Control::Redo => ("^Y", "Redo", Role::Redo),
-                Control::Apply => ("^S", "Apply", Role::Apply),
-                Control::Cancel => ("Esc", "Cancel", Role::Cancel),
-            };
+        let mut y = area.y;
+        for (index, control) in self.controls().into_iter().enumerate() {
+            if self.workspace == super::WorkspaceMode::Select && index == 4 {
+                x = area.x;
+                y += 1;
+            }
+            let (hotkey, name, role) = control.presentation(self.session);
             let focused = self.button == Some(control);
             let enabled = self.enabled(control);
             let line = Line::from(vec![
@@ -77,7 +169,7 @@ impl UiState {
                 ),
                 Span::raw(format!(" {name}]")),
             ]);
-            let rect = Rect::new(x, area.y, line.width() as u16, 1);
+            let rect = Rect::new(x, y, line.width() as u16, 1);
             frame.render_widget(
                 Paragraph::new(line)
                     .alignment(HorizontalAlignment::Center)

@@ -1,9 +1,9 @@
 use super::{
-    Mode, UiState,
+    Mode, SessionKind, UiState, WorkspaceMode,
     form::DETAIL_HEIGHT,
     theme::{Role, UiTheme},
 };
-use crate::edit::{color::preview, model::visible_ids, plan};
+use crate::edit::{color::preview, plan};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -11,7 +11,6 @@ use ratatui::{
     widgets::{Cell, HighlightSpacing, Paragraph, Row, Table},
 };
 
-const BOTTOM_CONTROLS_HEIGHT: u16 = 3;
 const TITLE_HEIGHT: u16 = 2; // Title plus one blank spacer row.
 
 pub(super) fn clean(text: &str) -> String {
@@ -66,6 +65,13 @@ impl UiState {
             Rect::new(area.x, area.y, area.width, 1),
             &theme,
         );
+        if self.workspace == WorkspaceMode::Select {
+            frame.render_widget(
+                Paragraph::new(self.selection_summary())
+                    .style(theme.style(Role::Help)),
+                Rect::new(area.x, area.y + 1, area.width, 1),
+            );
+        }
         self.render_body(frame, area, &theme);
         self.render_controls(frame, area, &theme);
         if self.modal.is_some() {
@@ -74,12 +80,12 @@ impl UiState {
     }
 
     fn render_body(&mut self, frame: &mut Frame, area: Rect, theme: &UiTheme) {
-        let visible = visible_ids(&self.document, &self.filter);
+        let visible = self.visible();
         let height = (visible.len().max(1).saturating_add(2)).min(usize::from(
             area.height
                 - TITLE_HEIGHT
                 - DETAIL_HEIGHT
-                - BOTTOM_CONTROLS_HEIGHT,
+                - self.controls_height(),
         )) as u16;
         let table_area =
             Rect::new(area.x, area.y + TITLE_HEIGHT, area.width, height);
@@ -98,6 +104,14 @@ impl UiState {
         );
     }
 
+    fn controls_height(&self) -> u16 {
+        if self.workspace == WorkspaceMode::Select {
+            4
+        } else {
+            3
+        }
+    }
+
     fn render_controls(
         &mut self,
         frame: &mut Frame,
@@ -106,16 +120,31 @@ impl UiState {
     ) {
         self.render_filter(
             frame,
-            Rect::new(area.x, area.bottom() - 3, area.width, 1),
+            Rect::new(
+                area.x,
+                area.bottom() - self.controls_height(),
+                area.width,
+                1,
+            ),
             theme,
         );
         self.render_help(
             frame,
-            Rect::new(area.x, area.bottom() - 2, area.width, 1),
+            Rect::new(
+                area.x,
+                area.bottom() - self.controls_height() + 1,
+                area.width,
+                1,
+            ),
         );
         self.render_footer(
             frame,
-            Rect::new(area.x, area.bottom() - 1, area.width, 1),
+            Rect::new(
+                area.x,
+                area.bottom() - self.controls_height() + 2,
+                area.width,
+                self.controls_height() - 2,
+            ),
             theme,
         );
     }
@@ -129,7 +158,12 @@ impl UiState {
             .count();
         frame.render_widget(
             Paragraph::new(format!(
-                "labeldeck edit — {}    {count} labels{}",
+                "labeldeck {} — {}    {count} labels{}",
+                if self.workspace == WorkspaceMode::Select {
+                    "select"
+                } else {
+                    "edit"
+                },
                 clean(&self.title),
                 if self.dirty() { " *" } else { "" }
             ))
@@ -144,7 +178,7 @@ impl UiState {
         area: Rect,
         theme: &UiTheme,
     ) {
-        let visible = visible_ids(&self.document, &self.filter);
+        let visible = self.visible();
         let table = self.table_widget(&visible, area.width, theme);
         self.table
             .select(visible.iter().position(|id| Some(*id) == self.selected));
@@ -161,10 +195,19 @@ impl UiState {
             area.height.saturating_sub(2),
         );
         if visible.is_empty() {
-            let message = if self.filter.is_empty() {
-                "No labels — n to add"
-            } else {
+            let message = if self.workspace == WorkspaceMode::Select
+                && self.candidates().is_empty()
+            {
+                "No changes"
+            } else if self.workspace == WorkspaceMode::Select
+                && self.selected_only
+                && self.candidates().iter().all(|r| !r.checked)
+            {
+                "No selected items"
+            } else if !self.filter.is_empty() {
                 "No filter matches"
+            } else {
+                "No labels — n to add"
             };
             frame.render_widget(
                 Paragraph::new(message).style(theme.style(Role::Help)),
@@ -179,50 +222,115 @@ impl UiState {
         width: u16,
         theme: &UiTheme,
     ) -> Table<'static> {
-        let entries: Vec<_> = visible
+        let selecting = self.workspace == WorkspaceMode::Select;
+        let candidates = self.candidates();
+        let drafts: Vec<_> = visible
             .iter()
             .filter_map(|id| {
-                self.document.entries().iter().find(|e| e.id == *id)
+                if selecting {
+                    candidates
+                        .iter()
+                        .find(|r| r.id == *id)
+                        .map(|r| r.draft.clone())
+                } else {
+                    self.document
+                        .entries()
+                        .iter()
+                        .find(|e| e.id == *id)
+                        .map(|e| e.draft.clone())
+                }
             })
             .collect();
-        let name_width = name_width(&entries, width);
-        let rows: Vec<_> = entries
+        let extra = if selecting {
+            if self.session == SessionKind::Export {
+                5
+            } else {
+                14
+            }
+        } else {
+            0
+        };
+        let name_width = drafts
             .iter()
-            .map(|entry| self.table_row(&entry.draft, theme))
+            .map(|d| Line::raw(clean(&d.name)).width())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+            .clamp(12, 34)
+            .min(usize::from(width.saturating_sub(28 + extra)))
+            as u16;
+        let mut widths = vec![
+            Constraint::Length(name_width),
+            Constraint::Length(
+                if selecting && self.session != SessionKind::Export {
+                    18
+                } else {
+                    10
+                },
+            ),
+            Constraint::Fill(1),
+        ];
+        let mut header = vec!["LABEL", "COLOR", "DESCRIPTION"];
+        if selecting {
+            widths.insert(0, Constraint::Length(3));
+            header.insert(0, "[ ]");
+            if self.session != SessionKind::Export {
+                widths.insert(1, Constraint::Length(6));
+                header.insert(1, "ACTION");
+            }
+        }
+        let rows: Vec<_> = visible
+            .iter()
+            .zip(&drafts)
+            .map(|(id, draft)| {
+                let mut cells = self.label_cells(draft, theme);
+                if selecting
+                    && let Some(row) = candidates.iter().find(|r| r.id == *id)
+                {
+                    cells.insert(
+                        0,
+                        Cell::from(if row.checked { "[x]" } else { "[ ]" }),
+                    );
+                    if let Some(group) = row.group {
+                        cells.insert(
+                            1,
+                            Cell::from(match group {
+                                super::ActionGroup::Create => "CREATE",
+                                super::ActionGroup::Update => "UPDATE",
+                                super::ActionGroup::Delete => "DELETE",
+                            }),
+                        );
+                    }
+                }
+                Row::new(cells)
+            })
             .collect();
-        Table::new(
-            rows,
-            [
-                Constraint::Length(name_width),
-                Constraint::Length(10),
-                Constraint::Fill(1),
-            ],
-        )
-        .column_spacing(2)
-        .highlight_spacing(HighlightSpacing::Always)
-        .header(
-            Row::new(["LABEL", "COLOR", "DESCRIPTION"])
-                .style(theme.style(Role::Header))
-                .bottom_margin(1),
-        )
-        .style(theme.style(Role::DetailValue))
-        .row_highlight_style(theme.style(Role::Selected))
-        .highlight_symbol("> ")
+        Table::new(rows, widths)
+            .column_spacing(2)
+            .highlight_spacing(HighlightSpacing::Always)
+            .header(
+                Row::new(header)
+                    .style(theme.style(Role::Header))
+                    .bottom_margin(1),
+            )
+            .style(theme.style(Role::DetailValue))
+            .row_highlight_style(theme.style(Role::Selected))
+            .highlight_symbol("> ")
     }
 
-    fn table_row(
+    fn label_cells(
         &self,
         draft: &crate::edit::model::Draft,
         theme: &UiTheme,
-    ) -> Row<'static> {
-        Row::new(vec![
+    ) -> Vec<Cell<'static>> {
+        vec![
             Cell::from(clean(&draft.name)),
             Cell::from(Line::from(vec![
                 self.swatch(&draft.color, theme),
                 Span::raw(clean(&draft.color)),
             ])),
             Cell::from(clean(&draft.description)),
-        ])
+        ]
     }
 
     fn render_filter(&self, frame: &mut Frame, area: Rect, theme: &UiTheme) {
@@ -271,6 +379,12 @@ impl UiState {
                     ("Enter", "accept"),
                     ("Esc", "restore"),
                 ],
+                Mode::List if self.workspace == WorkspaceMode::Select => &[
+                    ("↑↓", "navigate"),
+                    ("Space", "toggle"),
+                    ("/", "filter"),
+                    ("Tab", "controls"),
+                ],
                 Mode::List => &[
                     ("↑↓", "navigate"),
                     ("Enter", "edit"),
@@ -296,18 +410,4 @@ impl UiState {
             .collect();
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
-}
-
-fn name_width(
-    entries: &[&crate::edit::model::EditorEntry],
-    width: u16,
-) -> u16 {
-    entries
-        .iter()
-        .map(|e| Line::raw(clean(&e.draft.name)).width())
-        .max()
-        .unwrap_or(0)
-        .saturating_add(1)
-        .clamp(12, 34)
-        .min(usize::from(width.saturating_sub(28))) as u16
 }
