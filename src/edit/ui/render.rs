@@ -13,6 +13,7 @@ use ratatui::{
 
 const TITLE_HEIGHT: u16 = 2; // Title plus one blank spacer row.
 const TABLE_HIGHLIGHT: &str = "> ";
+const TABLE_COLUMN_SPACING: u16 = 2;
 
 pub(super) fn clean(text: &str) -> String {
     text.chars()
@@ -228,14 +229,41 @@ impl UiState {
         table: Rect,
         theme: &UiTheme,
     ) {
-        // Always-reserved marker gutter precedes the columns; Fill spans the rest.
-        let gutter = Line::raw(TABLE_HIGHLIGHT).width() as u16;
         frame.render_widget(
             Paragraph::new(self.selection_summary())
                 .alignment(HorizontalAlignment::Center)
                 .style(theme.style(Role::SelectionSummary)),
-            Rect::new(table.x + gutter, table.y - 1, table.width - gutter, 1),
+            Rect::new(
+                table.x,
+                table.y - 1,
+                self.selection_content_width(table.width),
+                1,
+            ),
         );
+    }
+
+    fn selection_content_width(&self, available: u16) -> u16 {
+        // visible() is the complete filtered candidate set, independent of scrolling.
+        let drafts = self.table_drafts(&self.visible(), &self.candidates());
+        let (columns, headers) = self.table_columns(&drafts, available);
+        let description = drafts
+            .iter()
+            .map(|draft| Line::raw(clean(&draft.description)).width())
+            .max()
+            .unwrap_or(0)
+            .max(headers.last().map_or(0, |text| Line::raw(*text).width()));
+        let fixed: usize = columns
+            .iter()
+            .filter_map(|column| match column {
+                Constraint::Length(width) => Some(usize::from(*width)),
+                _ => None,
+            })
+            .sum();
+        let width = Line::raw(TABLE_HIGHLIGHT).width()
+            + fixed
+            + description
+            + (columns.len() - 1) * usize::from(TABLE_COLUMN_SPACING);
+        width.min(usize::from(available)) as u16
     }
 
     fn table_widget(
@@ -275,7 +303,7 @@ impl UiState {
             })
             .collect();
         Table::new(rows, widths)
-            .column_spacing(2)
+            .column_spacing(TABLE_COLUMN_SPACING)
             .highlight_spacing(HighlightSpacing::Always)
             .header(
                 Row::new(header)

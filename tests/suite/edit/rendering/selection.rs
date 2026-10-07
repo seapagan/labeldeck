@@ -76,7 +76,12 @@ fn summary_centers_over_table_columns_and_has_its_own_emphasis() {
                 let buffer = draw(&mut select(session, level), width, 24);
                 let text = summary(session);
                 let length = Line::raw(text).width() as u16;
-                let x = 2 + (width - 2) / 2 - length / 2;
+                let content_width = if session == SessionKind::Export {
+                    44
+                } else {
+                    60
+                };
+                let x = content_width / 2 - length / 2;
                 assert_eq!(locate(&buffer, text), (x, 2));
                 assert_ne!(x, width / 2 - length / 2);
                 for column in x..x + length {
