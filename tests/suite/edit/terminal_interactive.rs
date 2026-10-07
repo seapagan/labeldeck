@@ -62,7 +62,7 @@ fn export_terminal_session_edits_saves_then_exports_empty_selection() {
             ("Save", "\u{13}"),
             ("Save working deck", "\t\r"),
             ("Saved", "\u{1b}"),
-            ("labels selected", "0f"),
+            ("[w Edit]", "0f"),
             ("Confirm Export", "\t\r"),
         ],
     );

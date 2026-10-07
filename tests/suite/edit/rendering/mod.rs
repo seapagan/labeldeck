@@ -3,6 +3,7 @@ mod controls;
 mod layout;
 mod modal;
 mod notices;
+mod selection;
 mod swatches;
 mod table;
 

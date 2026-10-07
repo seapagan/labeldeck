@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 pub(super) enum Role {
     Title,
     Header,
+    SelectionSummary,
     Separator,
     Selected,
     DetailLabel,
@@ -51,6 +52,7 @@ impl UiTheme {
                     style.fg(Color::Cyan)
                 }
                 Apply => style.fg(Color::Green),
+                SelectionSummary => style.fg(Color::LightMagenta),
                 Cancel | Warning => style.fg(Color::Yellow),
                 Error => style.fg(Color::Red),
                 Separator => style.fg(Color::DarkGray),
@@ -60,7 +62,7 @@ impl UiTheme {
         }
         style = match role {
             Title | Header | Selected | FocusedField | KeyHint | Error
-            | Warning | Apply | ModalTitle => {
+            | Warning | Apply | ModalTitle | SelectionSummary => {
                 style.add_modifier(Modifier::BOLD)
             }
             Help | Disabled => style.add_modifier(Modifier::DIM),

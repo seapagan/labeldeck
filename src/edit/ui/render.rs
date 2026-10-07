@@ -6,12 +6,13 @@ use super::{
 use crate::edit::{color::preview, plan};
 use ratatui::{
     Frame,
-    layout::{Constraint, Rect},
+    layout::{Constraint, HorizontalAlignment, Rect},
     text::{Line, Span},
     widgets::{Cell, HighlightSpacing, Paragraph, Row, Table},
 };
 
 const TITLE_HEIGHT: u16 = 2; // Title plus one blank spacer row.
+const TABLE_HIGHLIGHT: &str = "> ";
 
 pub(super) fn clean(text: &str) -> String {
     text.chars()
@@ -65,13 +66,6 @@ impl UiState {
             Rect::new(area.x, area.y, area.width, 1),
             &theme,
         );
-        if self.workspace == WorkspaceMode::Select {
-            frame.render_widget(
-                Paragraph::new(self.selection_summary())
-                    .style(theme.style(Role::Help)),
-                Rect::new(area.x, area.y + 1, area.width, 1),
-            );
-        }
         self.render_body(frame, area, &theme);
         self.render_controls(frame, area, &theme);
         if self.modal.is_some() {
@@ -81,14 +75,16 @@ impl UiState {
 
     fn render_body(&mut self, frame: &mut Frame, area: Rect, theme: &UiTheme) {
         let visible = self.visible();
+        let title_height =
+            TITLE_HEIGHT + u16::from(self.workspace == WorkspaceMode::Select);
         let height = (visible.len().max(1).saturating_add(2)).min(usize::from(
             area.height
-                - TITLE_HEIGHT
+                - title_height
                 - DETAIL_HEIGHT
                 - self.controls_height(),
         )) as u16;
         let table_area =
-            Rect::new(area.x, area.y + TITLE_HEIGHT, area.width, height);
+            Rect::new(area.x, area.y + title_height, area.width, height);
         self.render_table(frame, table_area, theme);
         let details =
             Rect::new(area.x, table_area.bottom(), area.width, DETAIL_HEIGHT);
@@ -185,6 +181,9 @@ impl UiState {
         area: Rect,
         theme: &UiTheme,
     ) {
+        if self.workspace == WorkspaceMode::Select {
+            self.render_selection_summary(frame, area, theme);
+        }
         let visible = self.visible();
         let table = self.table_widget(&visible, area.width, theme);
         self.table
@@ -221,6 +220,22 @@ impl UiState {
                 self.rows,
             );
         }
+    }
+
+    fn render_selection_summary(
+        &self,
+        frame: &mut Frame,
+        table: Rect,
+        theme: &UiTheme,
+    ) {
+        // Always-reserved marker gutter precedes the columns; Fill spans the rest.
+        let gutter = Line::raw(TABLE_HIGHLIGHT).width() as u16;
+        frame.render_widget(
+            Paragraph::new(self.selection_summary())
+                .alignment(HorizontalAlignment::Center)
+                .style(theme.style(Role::SelectionSummary)),
+            Rect::new(table.x + gutter, table.y - 1, table.width - gutter, 1),
+        );
     }
 
     fn table_widget(
@@ -269,7 +284,7 @@ impl UiState {
             )
             .style(theme.style(Role::DetailValue))
             .row_highlight_style(theme.style(Role::Selected))
-            .highlight_symbol("> ")
+            .highlight_symbol(TABLE_HIGHLIGHT)
     }
 
     fn table_drafts(
@@ -333,7 +348,7 @@ impl UiState {
         let mut header = vec!["LABEL", "COLOR", "DESCRIPTION"];
         if selecting {
             widths.insert(0, Constraint::Length(3));
-            header.insert(0, "[ ]");
+            header.insert(0, "");
             if self.session != SessionKind::Export {
                 widths.insert(1, Constraint::Length(6));
                 header.insert(1, "ACTION");
@@ -413,7 +428,7 @@ impl UiState {
                     ("↑↓", "navigate"),
                     ("Space", "toggle"),
                     ("/", "filter"),
-                    ("Tab", "controls"),
+                    ("Tab", "cycle buttons"),
                 ],
                 Mode::List => &[
                     ("↑↓", "navigate"),
