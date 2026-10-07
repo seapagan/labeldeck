@@ -6,7 +6,7 @@ use std::{
 
 struct Resolved {
     path: PathBuf,
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(windows, target_os = "macos", test))]
     ancestor: PathBuf,
 }
 
@@ -15,11 +15,7 @@ pub fn same_destination(left: &Path, right: &Path) -> io::Result<bool> {
     let right = resolve(right)?;
     #[cfg(windows)]
     {
-        Ok(left
-            .path
-            .as_os_str()
-            .as_encoded_bytes()
-            .eq_ignore_ascii_case(right.path.as_os_str().as_encoded_bytes()))
+        same_resolved(&left, &right, |_| Ok(true))
     }
     #[cfg(target_os = "macos")]
     {
@@ -31,7 +27,7 @@ pub fn same_destination(left: &Path, right: &Path) -> io::Result<bool> {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn same_resolved(
     left: &Resolved,
     right: &Resolved,
@@ -40,16 +36,46 @@ fn same_resolved(
     if left.path == right.path {
         return Ok(true);
     }
-    if left.ancestor != right.ancestor
-        || !left
-            .path
-            .as_os_str()
-            .as_encoded_bytes()
-            .eq_ignore_ascii_case(right.path.as_os_str().as_encoded_bytes())
-    {
+    if left.ancestor != right.ancestor {
         return Ok(false);
     }
-    probe(&left.ancestor)
+    let comparison = compare_missing_case(&left.path, &right.path)?;
+    if !comparison || !probe(&left.ancestor)? {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+fn compare_missing_case(left: &Path, right: &Path) -> io::Result<bool> {
+    if left.components().count() != right.components().count() {
+        return Ok(false);
+    }
+    let mut ambiguous = false;
+    for (left, right) in left.components().zip(right.components()) {
+        if left == right {
+            continue;
+        }
+        let left = left.as_os_str().as_encoded_bytes();
+        let right = right.as_os_str().as_encoded_bytes();
+        if left.is_ascii() && right.is_ascii() {
+            if !left.eq_ignore_ascii_case(right) {
+                return Ok(false);
+            }
+        } else {
+            // Unicode casing/normalization follows filesystem tables, not
+            // Rust's Unicode lowercase rules. Missing paths cannot resolve it.
+            ambiguous = true;
+        }
+    }
+    if ambiguous {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "cannot establish Unicode case-alias identity for missing Save destinations",
+        ))
+    } else {
+        Ok(true)
+    }
 }
 
 #[cfg(any(target_os = "macos", all(test, unix)))]
@@ -122,14 +148,14 @@ fn resolve(path: &Path) -> io::Result<Resolved> {
         match std::fs::symlink_metadata(&ancestor) {
             Ok(_) => {
                 let mut resolved = std::fs::canonicalize(&ancestor)?;
-                #[cfg(any(target_os = "macos", test))]
+                #[cfg(any(windows, target_os = "macos", test))]
                 let ancestor = resolved.clone();
                 for component in suffix.into_iter().rev() {
                     resolved.push(component);
                 }
                 return Ok(Resolved {
                     path: resolved,
-                    #[cfg(any(target_os = "macos", test))]
+                    #[cfg(any(windows, target_os = "macos", test))]
                     ancestor,
                 });
             }

@@ -153,3 +153,32 @@ fn non_directory_save_parent_reports_error_without_recording_success() {
     assert!(ui.saves().is_empty());
     assert!(!host.config_dir.exists());
 }
+
+#[test]
+fn first_global_save_with_unicode_missing_parents_and_distinct_protected_path_succeeds()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = host(dir.path());
+    host.config_dir = dir.path().join("配置/labeldeck");
+    host.protected = Some(dir.path().join("配置/export/out.json"));
+    assert!(host.allowed(SaveTarget::Global).unwrap());
+    let record = host.save(&document(), SaveTarget::Global).unwrap();
+    assert_eq!(
+        crate::commands::read_canonical(&record.path).unwrap(),
+        document().labels().unwrap()
+    );
+    assert!(!host.protected.unwrap().exists());
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn ambiguous_unicode_protected_global_destination_prevents_directory_creation()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = host(dir.path());
+    host.config_dir = dir.path().join("Étage");
+    host.protected = Some(dir.path().join("étage/labels.json"));
+    assert!(host.save(&document(), SaveTarget::Global).is_err());
+    assert!(!host.config_dir.exists());
+    assert!(!host.protected.unwrap().exists());
+}

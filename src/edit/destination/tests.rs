@@ -130,6 +130,47 @@ fn different_existing_ancestors_are_not_merged_by_missing_case_comparison() {
     );
 }
 
+#[test]
+fn unresolved_unicode_aliases_are_rejected_only_when_identity_is_ambiguous() {
+    let dir = tempfile::tempdir().unwrap();
+    let left = resolve(&dir.path().join("Étage/labels.json")).unwrap();
+    let right = resolve(&dir.path().join("étage/labels.json")).unwrap();
+    assert_eq!(
+        same_resolved(&left, &right, |_| Ok(true))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert_eq!(
+        same_resolved(&left, &right, |_| Ok(false))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Unsupported
+    );
+    let distinct = resolve(&dir.path().join("étage/other.json")).unwrap();
+    assert!(
+        !same_resolved(&left, &distinct, |_| Err(io::Error::other("unused")))
+            .unwrap()
+    );
+    let matching = resolve(&dir.path().join("Étage/LABELS.JSON")).unwrap();
+    assert!(same_resolved(&left, &matching, |_| Ok(true)).unwrap());
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn missing_unicode_parent_case_aliases_cannot_enable_an_unsafe_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let left = dir.path().join("Étage/labels.json");
+    let right = dir.path().join("étage/labels.json");
+    assert_eq!(
+        same_destination(&left, &right).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert!(!left.parent().unwrap().exists());
+    assert!(!right.parent().unwrap().exists());
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn missing_final_case_aliases_respect_the_macos_volume() {
