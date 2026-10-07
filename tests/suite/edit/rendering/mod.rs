@@ -2,6 +2,7 @@ mod common;
 mod controls;
 mod layout;
 mod modal;
+mod notices;
 mod swatches;
 mod table;
 

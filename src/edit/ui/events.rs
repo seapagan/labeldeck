@@ -73,7 +73,7 @@ impl UiState {
                     } else {
                         self.document.redo();
                     }
-                    self.error.clear();
+                    self.message = None;
                     self.repair_selection();
                     return None;
                 }
@@ -158,7 +158,7 @@ impl UiState {
                     },
                 ));
                 self.button = None;
-                self.error.clear();
+                self.message = None;
             }
             KeyCode::Delete => self.delete_selected(),
             KeyCode::Char('s') => self.open_save(),
@@ -256,19 +256,19 @@ impl UiState {
         self.mode =
             Mode::Edit(EditForm::new(Some(entry.id), entry.draft.clone()));
         self.button = None;
-        self.error.clear();
+        self.message = None;
     }
 
     fn edit_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::List;
-                self.error.clear();
+                self.message = None;
                 self.repair_selection();
             }
             KeyCode::Enter => {
                 if let Err(error) = self.commit_form() {
-                    self.error = error;
+                    self.set_error(error);
                 }
             }
             _ => {
@@ -284,10 +284,11 @@ impl UiState {
                             if let Some(request) =
                                 to_input_request(&Event::Key(key))
                             {
-                                self.error = form
+                                let error = form
                                     .handle(request)
                                     .err()
                                     .unwrap_or_default();
+                                self.set_error(error);
                             }
                         }
                     }
@@ -307,7 +308,7 @@ impl UiState {
             self.selected = Some(self.document.create(draft)?);
         }
         self.mode = Mode::List;
-        self.error.clear();
+        self.message = None;
         self.repair_selection();
         Ok(())
     }
@@ -318,7 +319,8 @@ impl UiState {
         }
         match &mut self.mode {
             Mode::Edit(form) => {
-                self.error = form.insert(text).err().unwrap_or_default();
+                let error = form.insert(text).err().unwrap_or_default();
+                self.set_error(error);
             }
             Mode::Filter { input, .. } => {
                 for ch in text.chars().filter(|ch| !ch.is_control()) {
@@ -343,7 +345,7 @@ impl UiState {
             return;
         }
         if !self.dirty() {
-            self.error = "No changes to apply.".into();
+            self.set_status("No changes to apply.".into());
             return;
         }
         match plan::plan(&self.document) {
@@ -353,9 +355,9 @@ impl UiState {
                     choice: 1,
                 });
                 self.buttons.clear();
-                self.error.clear();
+                self.message = None;
             }
-            Err(error) => self.error = error,
+            Err(error) => self.set_error(error),
         }
     }
 
@@ -367,7 +369,7 @@ impl UiState {
         if !self.enabled(control) {
             return None;
         }
-        self.error.clear();
+        self.message = None;
         match control {
             Control::Undo => {
                 self.document.undo();

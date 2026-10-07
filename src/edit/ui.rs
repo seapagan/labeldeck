@@ -135,6 +135,11 @@ struct ConfirmApply {
     summary: ChangeSummary,
 }
 
+enum Message {
+    Error(String),
+    Status(String),
+}
+
 pub struct UiState {
     document: Document,
     session: SessionKind,
@@ -152,7 +157,7 @@ pub struct UiState {
     filter: String,
     mode: Mode,
     modal: Option<Modal>,
-    error: String,
+    message: Option<Message>,
     button: Option<Control>,
     buttons: Vec<Rect>,
     rows: Rect,
@@ -189,7 +194,7 @@ impl UiState {
             filter: String::new(),
             mode: Mode::List,
             modal: None,
-            error: String::new(),
+            message: None,
             button: None,
             buttons: Vec::new(),
             rows: Rect::default(),
@@ -219,7 +224,11 @@ impl UiState {
         &self.saves
     }
     pub fn set_status(&mut self, message: String) {
-        self.error = message;
+        self.message = Some(Message::Status(message));
+    }
+    pub fn set_error(&mut self, message: String) {
+        self.message =
+            (!message.is_empty()).then_some(Message::Error(message));
     }
     pub fn set_save_choices(
         &mut self,
@@ -244,7 +253,7 @@ impl UiState {
     ) {
         match result {
             Ok(record) => {
-                self.error = format!(
+                self.set_status(format!(
                     "Saved {}{}",
                     record.path.display(),
                     if record.warning.is_some() {
@@ -252,10 +261,10 @@ impl UiState {
                     } else {
                         ""
                     }
-                );
+                ));
                 self.saves.push(record);
             }
-            Err(error) => self.error = error.to_string(),
+            Err(error) => self.set_error(error.to_string()),
         }
     }
     fn open_save(&mut self) {
@@ -266,7 +275,7 @@ impl UiState {
             return;
         }
         if let Err(error) = self.document.labels() {
-            self.error = error;
+            self.set_error(error);
             return;
         }
         self.modal = Some(Modal {

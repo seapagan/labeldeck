@@ -73,7 +73,7 @@ impl SaveHost {
         {
             match self.allowed(target) {
                 Ok(allowed) => choices[i] = allowed,
-                Err(error) => state.set_status(format!(
+                Err(error) => state.set_error(format!(
                     "Could not check Save destination: {error}"
                 )),
             }

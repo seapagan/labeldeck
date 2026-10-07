@@ -93,8 +93,15 @@ impl UiState {
         let details =
             Rect::new(area.x, table_area.bottom(), area.width, DETAIL_HEIGHT);
         self.render_details(frame, details, theme);
+        let (message, role) = match &self.message {
+            Some(super::Message::Error(text)) => (text.as_str(), Role::Error),
+            Some(super::Message::Status(text)) => {
+                (text.as_str(), Role::Status)
+            }
+            None => ("", Role::Status),
+        };
         frame.render_widget(
-            Paragraph::new(clean(&self.error)).style(theme.style(Role::Error)),
+            Paragraph::new(clean(message)).style(theme.style(role)),
             Rect::new(
                 details.x + 2,
                 details.bottom() - 1,

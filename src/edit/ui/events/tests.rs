@@ -57,7 +57,7 @@ fn modified_list_shortcuts_never_fall_through() {
             assert!(matches!(ui.mode, Mode::List));
             assert!(ui.modal.is_none());
             assert!(!ui.document.can_undo());
-            assert!(ui.error.is_empty());
+            assert!(ui.message.is_none());
         }
     }
 }
@@ -260,10 +260,12 @@ fn apply_button_delegates_no_changes_and_confirmation_to_confirm() {
     let mut ui = state();
     assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.modal.is_none());
-    assert_eq!(ui.error, "No changes to apply.");
+    assert!(
+        matches!(&ui.message, Some(super::super::Message::Status(text)) if text == "No changes to apply.")
+    );
     ui.delete_selected();
     assert!(ui.activate(Control::Apply).is_none());
-    assert!(ui.error.is_empty());
+    assert!(ui.message.is_none());
     assert!(!(ui.modal.as_ref().unwrap().choice == 0));
     assert!(ui.activate(Control::Apply).is_none());
     assert!(!(ui.modal.as_ref().unwrap().choice == 0));

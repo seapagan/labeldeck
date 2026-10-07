@@ -2,6 +2,22 @@ use super::{
     UiAction, UiState,
     theme::{Role, UiTheme},
 };
+
+#[derive(Clone, Copy)]
+enum ModalAction {
+    Confirm,
+    Save(crate::edit::session::SaveTarget),
+    Back,
+}
+
+impl ModalAction {
+    fn role(self) -> Role {
+        match self {
+            Self::Back => Role::Cancel,
+            Self::Confirm | Self::Save(_) => Role::Apply,
+        }
+    }
+}
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
@@ -33,25 +49,46 @@ impl UiState {
         }
         None
     }
-    fn modal_choices(&self) -> Vec<(&'static str, bool)> {
+    fn modal_choices(&self) -> Vec<(&'static str, bool, ModalAction)> {
+        use crate::edit::session::SaveTarget;
         match self.modal.as_ref().map(|m| &m.kind) {
             Some(super::ModalKind::Save) => vec![
-                ("Save Local", self.save_choices[0]),
-                ("Save Global", self.save_choices[1]),
-                ("Back", true),
+                (
+                    "Save Local",
+                    self.save_choices[0],
+                    ModalAction::Save(SaveTarget::Local),
+                ),
+                (
+                    "Save Global",
+                    self.save_choices[1],
+                    ModalAction::Save(SaveTarget::Global),
+                ),
+                ("Back", true, ModalAction::Back),
             ],
             Some(super::ModalKind::Reset) => {
-                vec![("Edit", true), ("Back", true)]
+                vec![
+                    ("Edit", true, ModalAction::Confirm),
+                    ("Back", true, ModalAction::Back),
+                ]
             }
             Some(super::ModalKind::Finish(super::FinalSelection::Export(
                 _,
-            ))) => vec![("Export", true), ("Back", true)],
+            ))) => vec![
+                ("Export", true, ModalAction::Confirm),
+                ("Back", true, ModalAction::Back),
+            ],
             Some(super::ModalKind::Finish(_))
                 if self.session == super::SessionKind::Copy =>
             {
-                vec![("Copy", true), ("Back", true)]
+                vec![
+                    ("Copy", true, ModalAction::Confirm),
+                    ("Back", true, ModalAction::Back),
+                ]
             }
-            _ => vec![("Apply", true), ("Back", true)],
+            _ => vec![
+                ("Apply", true, ModalAction::Confirm),
+                ("Back", true, ModalAction::Back),
+            ],
         }
     }
     fn focus_modal(&mut self, back: bool) {
@@ -74,7 +111,8 @@ impl UiState {
         if !choices.get(choice)?.1 {
             return None;
         }
-        if choices[choice].0 == "Back" {
+        let action = choices[choice].2;
+        if matches!(action, ModalAction::Back) {
             self.dismiss_modal();
             return None;
         }
@@ -90,10 +128,8 @@ impl UiState {
                 None
             }
             super::ModalKind::Save => {
-                let target = if choice == 0 {
-                    crate::edit::session::SaveTarget::Local
-                } else {
-                    crate::edit::session::SaveTarget::Global
+                let ModalAction::Save(target) = action else {
+                    return None;
                 };
                 self.dismiss_modal();
                 Some(UiAction::Save(target))
@@ -176,7 +212,7 @@ impl UiState {
         let save = matches!(modal.kind, super::ModalKind::Save);
         let texts: Vec<_> = choices
             .iter()
-            .map(|(name, _)| {
+            .map(|(name, _, _)| {
                 if save {
                     format!("[{name}]")
                 } else {
@@ -188,13 +224,13 @@ impl UiState {
             + 2 * (texts.len() as u16 - 1);
         let mut x = rect.x + (width.saturating_sub(total)) / 2;
         self.buttons.clear();
-        for (i, (text, (_, enabled))) in
+        for (i, (text, (_, enabled, action))) in
             texts.into_iter().zip(choices).enumerate()
         {
             let button = Rect::new(x, rect.bottom() - 3, text.len() as u16, 1);
             frame.render_widget(
                 Paragraph::new(text).style(theme.button(
-                    if i == 0 { Role::Apply } else { Role::Cancel },
+                    action.role(),
                     enabled,
                     modal.choice == i,
                 )),

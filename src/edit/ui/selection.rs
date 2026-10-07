@@ -260,7 +260,7 @@ impl UiState {
         let labels = match self.document.labels() {
             Ok(labels) => labels,
             Err(error) => {
-                self.error = error;
+                self.set_error(error);
                 return;
             }
         };
@@ -273,7 +273,7 @@ impl UiState {
         {
             *plan = crate::plan::plan(&labels, target, *prune);
             *checked = vec![true; operation_count(plan)];
-            self.error = "Plan updated — selections reset.".into();
+            self.set_status("Plan updated — selections reset.".into());
         }
         self.workspace = WorkspaceMode::Select;
         self.button = None;
@@ -285,7 +285,7 @@ impl UiState {
             match self.selected_labels() {
                 Ok(labels) => FinalSelection::Export(labels),
                 Err(error) => {
-                    self.error = error;
+                    self.set_error(error);
                     return;
                 }
             }

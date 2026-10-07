@@ -16,6 +16,7 @@ pub(super) enum Role {
     Help,
     KeyHint,
     Error,
+    Status,
     Warning,
     Apply,
     Cancel,
@@ -46,7 +47,7 @@ impl UiTheme {
         if self.colour {
             style = match role {
                 Title | Header | DetailLabel | Filter | KeyHint | Undo
-                | Redo | ModalBorder | ModalTitle | EditAccent => {
+                | Redo | ModalBorder | ModalTitle | EditAccent | Status => {
                     style.fg(Color::Cyan)
                 }
                 Apply => style.fg(Color::Green),
