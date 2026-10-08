@@ -1,50 +1,7 @@
 //! Real terminal boundary tests; portable state/event contracts use TestBackend.
 #![cfg(unix)]
+use crate::common::terminal::terminal;
 use crate::common::{Expectation, Isolation, labels_json, mock_github};
-use std::process::Command;
-
-fn terminal(
-    isolation: &Isolation,
-    args: &[&str],
-    api: &str,
-    steps: &[(&str, &str)],
-) -> String {
-    let template = isolation.command(args);
-    let mut command = Command::new("python3");
-    command
-        .args([concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/terminal/drive.py"
-        )])
-        .arg(template.get_program())
-        .arg(serde_json::to_string(steps).unwrap())
-        .arg("labeldeck")
-        .args(args);
-    for (name, value) in template.get_envs() {
-        match value {
-            Some(value) => {
-                command.env(name, value);
-            }
-            None => {
-                command.env_remove(name);
-            }
-        }
-    }
-    command
-        .env("LABELDECK_API", api)
-        .env("LABELDECK_TOKEN", "test-token")
-        .env("NO_COLOR", "1")
-        .env("TERM", "xterm")
-        .current_dir(&isolation.config_dir);
-    let output = command.output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
-    );
-    String::from_utf8(output.stdout).unwrap()
-}
 
 #[test]
 fn export_terminal_session_edits_saves_then_exports_empty_selection() {
