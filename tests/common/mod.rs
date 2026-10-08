@@ -1,7 +1,6 @@
 //! Shared test support: a deterministic in-process mock of the GitHub
 //! REST API, used by integration tests so no test ever contacts GitHub.
 
-#[cfg(unix)]
 pub mod terminal;
 
 use std::collections::VecDeque;

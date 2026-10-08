@@ -1,5 +1,4 @@
 //! Real terminal boundary tests; portable state/event contracts use TestBackend.
-#![cfg(unix)]
 use crate::common::terminal::terminal;
 use crate::common::{Expectation, Isolation, labels_json, mock_github};
 
