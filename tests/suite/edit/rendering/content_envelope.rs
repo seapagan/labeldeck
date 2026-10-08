@@ -137,8 +137,6 @@ fn plain_edit_buffer_matches_prechange_symbols_styles_and_positions() {
         ColorLevel::TrueColor,
     );
     let buffer = draw(&mut ui, 80, 24);
-    assert_eq!(
-        format!("{buffer:?}"),
-        include_str!("plain_edit_buffer.txt").trim_end()
-    );
+    let expected = include_str!("plain_edit_buffer.txt").replace("\r\n", "\n");
+    assert_eq!(format!("{buffer:?}"), expected.trim_end());
 }
