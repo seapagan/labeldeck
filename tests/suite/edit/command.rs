@@ -96,9 +96,7 @@ fn explicit_non_utf8_paths_remain_supported_by_cli() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn file_session_preserves_non_utf8_source_identity_for_save_protection() {
+fn assert_file_session_save_protection(path: &Path) {
     use labeldeck::{
         commands::edit::edit_file_session_with,
         edit::{
@@ -106,23 +104,22 @@ fn file_session_preserves_non_utf8_source_identity_for_save_protection() {
             ui::UiAction,
         },
     };
-    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
-    let root = tempfile::tempdir().unwrap();
-    let directory =
-        root.path().join(OsString::from_vec(b"deck-\xff".to_vec()));
-    std::fs::create_dir(&directory).unwrap();
-    let path = directory.join("labels.json");
-    std::fs::write(&path, "[]").unwrap();
-    let selection = SourceSelection::Explicit(path.clone());
+    std::fs::write(path, "[]").unwrap();
+    let selection = SourceSelection::Explicit(path.into());
     edit_file_session_with(&selection, |_, title, _, source| {
         assert_eq!(source, path);
-        assert_ne!(Path::new(title), source);
+        if path.to_str().is_none() {
+            assert_ne!(Path::new(title), source);
+        }
         let host = SaveHost {
-            local: path.clone(),
-            config_dir: root.path().join("config"),
+            local: path.into(),
+            config_dir: path.parent().unwrap().join("config"),
             protected: Some(source.into()),
         };
-        assert!(host.save(&changed_document(), SaveTarget::Local).is_err());
+        assert!(matches!(
+            host.save(&changed_document(), SaveTarget::Local),
+            Err(labeldeck::error::Error::Usage(message)) if message.contains("protected")
+        ));
         SessionResult {
             outcome: Ok(UiAction::Cancel),
             saves: Vec::new(),
@@ -130,6 +127,25 @@ fn file_session_preserves_non_utf8_source_identity_for_save_protection() {
     })
     .unwrap();
     assert_eq!(std::fs::read(path).unwrap(), b"[]");
+}
+
+#[test]
+fn file_session_preserves_utf8_source_identity_for_save_protection() {
+    let root = tempfile::tempdir().unwrap();
+    assert_file_session_save_protection(&root.path().join("déck.json"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn file_session_preserves_non_utf8_source_identity_for_save_protection() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let root = tempfile::tempdir().unwrap();
+    let directory =
+        root.path().join(OsString::from_vec(b"deck-\xff".to_vec()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("labels.json");
+    assert!(path.to_str().is_none());
+    assert_file_session_save_protection(&path);
 }
 
 #[cfg(unix)]
