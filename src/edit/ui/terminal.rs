@@ -73,7 +73,7 @@ impl Drop for Guard {
 
 pub(super) fn run(
     state: &mut UiState,
-    mut service: impl FnMut(&mut UiState, Option<crate::edit::session::SaveTarget>),
+    mut service: impl FnMut(&mut UiState, crate::edit::session::SaveRequest),
 ) -> io::Result<UiAction> {
     let _guard = Guard;
     PanicHookGuard::install().run(|| {

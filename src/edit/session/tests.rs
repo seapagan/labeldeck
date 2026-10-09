@@ -149,7 +149,10 @@ fn non_directory_save_parent_reports_error_without_recording_success() {
         colored_text::ColorLevel::NoColor,
     );
     host.refresh(&mut ui);
-    host.service(&mut ui, Some(SaveTarget::Global));
+    host.service(
+        &mut ui,
+        crate::edit::session::SaveRequest::Save(SaveTarget::Global),
+    );
     assert!(ui.saves().is_empty());
     assert!(!host.config_dir.exists());
 }

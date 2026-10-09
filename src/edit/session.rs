@@ -15,6 +15,13 @@ pub enum SaveTarget {
     Global,
 }
 
+/// Requests occur only on opening Save or committing a chosen target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveRequest {
+    Refresh,
+    Save(SaveTarget),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveRecord {
     pub path: PathBuf,
@@ -133,12 +140,13 @@ impl SaveHost {
             }),
         }
     }
-    pub fn service(&self, state: &mut UiState, request: Option<SaveTarget>) {
-        if let Some(target) = request {
-            let result = self.save(state.document(), target);
-            state.record_save(result);
-        } else {
-            self.refresh(state);
+    pub fn service(&self, state: &mut UiState, request: SaveRequest) {
+        match request {
+            SaveRequest::Refresh => self.refresh(state),
+            SaveRequest::Save(target) => {
+                let result = self.save(state.document(), target);
+                state.record_save(result);
+            }
         }
     }
 }

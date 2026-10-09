@@ -316,7 +316,10 @@ fn completed_save_survives_cancel_and_event_read_failure() {
         let mut ui = export();
         key(&mut ui, KeyCode::Char('0'));
         key(&mut ui, KeyCode::Char('w'));
-        host.service(&mut ui, Some(SaveTarget::Local));
+        host.service(
+            &mut ui,
+            labeldeck::edit::session::SaveRequest::Save(SaveTarget::Local),
+        );
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let result = drive_session(
             &mut terminal,
@@ -476,12 +479,18 @@ fn save_preserves_dirty_and_undo_redo_while_recording_failures() {
     let mut ui = export();
     key(&mut ui, KeyCode::Char('w'));
     key(&mut ui, KeyCode::Delete);
-    host.service(&mut ui, Some(SaveTarget::Local));
+    host.service(
+        &mut ui,
+        labeldeck::edit::session::SaveRequest::Save(SaveTarget::Local),
+    );
     assert!(screen(&mut ui, 80, 24).contains(" *"));
     assert!(ui.document().can_undo());
     ctrl(&mut ui, 'z');
     assert!(ui.document().can_redo());
-    host.service(&mut ui, Some(SaveTarget::Global));
+    host.service(
+        &mut ui,
+        labeldeck::edit::session::SaveRequest::Save(SaveTarget::Global),
+    );
     assert!(ui.document().can_redo());
     ui.record_save(Err(labeldeck::error::Error::Usage(
         "injected failure".into(),

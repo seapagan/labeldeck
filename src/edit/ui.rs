@@ -41,15 +41,25 @@ pub fn drive_session<B: ratatui::backend::Backend>(
     terminal: &mut ratatui::Terminal<B>,
     state: &mut UiState,
     mut read: impl FnMut() -> std::io::Result<crossterm::event::Event>,
-    mut service: impl FnMut(&mut UiState, Option<super::session::SaveTarget>),
+    mut service: impl FnMut(&mut UiState, super::session::SaveRequest),
 ) -> std::io::Result<UiAction> {
+    let mut save_open = false;
     loop {
-        service(state, None);
+        let open = matches!(
+            state.modal.as_ref().map(|m| &m.kind),
+            Some(ModalKind::Save)
+        );
+        if open && !save_open {
+            service(state, super::session::SaveRequest::Refresh);
+        }
+        save_open = open;
         terminal
             .draw(|frame| state.render(frame))
             .map_err(|error| std::io::Error::other(error.to_string()))?;
         match state.handle(read()?) {
-            Some(UiAction::Save(target)) => service(state, Some(target)),
+            Some(UiAction::Save(target)) => {
+                service(state, super::session::SaveRequest::Save(target))
+            }
             Some(action) => return Ok(action),
             None => {}
         }
@@ -58,7 +68,7 @@ pub fn drive_session<B: ratatui::backend::Backend>(
 
 pub(crate) fn run_session(
     state: &mut UiState,
-    service: impl FnMut(&mut UiState, Option<super::session::SaveTarget>),
+    service: impl FnMut(&mut UiState, super::session::SaveRequest),
 ) -> std::io::Result<UiAction> {
     terminal::run(state, service)
 }
