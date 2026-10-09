@@ -137,17 +137,14 @@ impl UiState {
             Control::Apply => self.apply_available(),
             Control::Cancel => true,
             Control::Group(group) => {
-                list && self
-                    .candidates()
-                    .iter()
-                    .any(|r| r.group == Some(group))
+                list && self.candidate_count(Some(group)) != 0
             }
             Control::All | Control::None | Control::Invert => {
-                list && !self.candidates().is_empty()
+                list && self.candidate_count(None) != 0
             }
             Control::Finish => {
                 list && (self.session == super::SessionKind::Export
-                    || !self.selected_plan().is_empty())
+                    || self.has_selected_operations())
             }
             _ => list,
         }
@@ -217,3 +214,6 @@ impl UiState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

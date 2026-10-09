@@ -52,9 +52,16 @@ impl UiState {
         if self.small {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "terminal too small (minimum {}x{}); Esc/Ctrl-C to cancel",
+                    "terminal too small (minimum {}x{}); {}",
                     self.minimum_size().0,
-                    self.minimum_size().1
+                    self.minimum_size().1,
+                    if self.session != SessionKind::Edit
+                        && self.workspace == WorkspaceMode::Edit
+                    {
+                        "Esc/q: Done; Ctrl-C: cancel"
+                    } else {
+                        "Esc/Ctrl-C to cancel"
+                    }
                 )),
                 area,
             );

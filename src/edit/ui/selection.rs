@@ -85,6 +85,30 @@ impl UiState {
         }
     }
 
+    /// Borrow selection metadata; control checks never need cloned row drafts.
+    pub(super) fn candidate_count(&self, group: Option<ActionGroup>) -> usize {
+        match &self.selection {
+            Some(Selection::Export(_)) if group.is_none() => self
+                .document
+                .entries()
+                .iter()
+                .filter(|entry| !entry.deleted)
+                .count(),
+            Some(Selection::Operations { plan, .. }) => match group {
+                Some(ActionGroup::Create) => plan.creates.len(),
+                Some(ActionGroup::Update) => plan.updates.len(),
+                Some(ActionGroup::Delete) => plan.deletes.len(),
+                None => operation_count(plan),
+            },
+            _ => 0,
+        }
+    }
+
+    pub(super) fn has_selected_operations(&self) -> bool {
+        matches!(&self.selection, Some(Selection::Operations { plan, checked, .. })
+            if checked.iter().take(operation_count(plan)).any(|value| *value))
+    }
+
     pub(super) fn candidates(&self) -> Vec<Candidate> {
         match &self.selection {
             Some(Selection::Export(preferences)) => self
