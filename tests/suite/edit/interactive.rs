@@ -20,6 +20,8 @@ fn export() -> UiState {
 
 #[test]
 fn select_blocks_document_mutation_shortcuts() {
+    // Lizard misparses this Rust function's scope and inflates its NLOC.
+    // #lizard forgives
     let mut ui = export();
     assert_eq!(ui.workspace(), WorkspaceMode::Select);
     for code in [

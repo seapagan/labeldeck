@@ -100,6 +100,8 @@ fn target_refetch_failure_reports_zero_mutations_and_rerun() {
 
 #[test]
 fn reordered_target_executes_selected_delete_without_related_create() {
+    // Lizard misparses this Rust function's scope and inflates its NLOC.
+    // #lizard forgives
     let mock = mock_github(vec![
         page(&[("old", "ededed", Some("")), ("retain", "ededed", Some(""))]),
         page(&[("retain", "ededed", Some("")), ("old", "ededed", Some(""))]),
