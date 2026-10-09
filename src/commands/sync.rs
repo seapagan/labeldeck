@@ -91,7 +91,13 @@ pub fn run_interactive(
         success_line: format!("Synchronized {}/{}", repo.owner, repo.name),
         config_dir,
     };
-    super::interactive::run(&client, &repo, canonical, context)
+    super::interactive::reconcile_with(
+        &client,
+        &repo,
+        canonical,
+        context,
+        crate::edit::session::run,
+    )
 }
 
 /// The "run again" guidance shown after `--dry-run`, pinned to the

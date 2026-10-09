@@ -2,7 +2,7 @@
 use crate::{
     edit::{
         model::Document,
-        session::{self, SaveHost, SessionResult},
+        session::{SaveHost, SessionResult},
         ui::{FinalSelection, SessionKind, UiAction, UiState},
     },
     error::{Error, Result},
@@ -78,13 +78,4 @@ fn validate_target(
         return Err(Error::Usage("the target changed while the interactive plan was open. No mutations were attempted; rerun the command.".into()));
     }
     Ok(())
-}
-
-pub(crate) fn run(
-    client: &GitHubClient,
-    target: &RepoSpec,
-    desired: Vec<Label>,
-    context: ReconcileContext,
-) -> Result<i32> {
-    reconcile_with(client, target, desired, context, session::run)
 }
