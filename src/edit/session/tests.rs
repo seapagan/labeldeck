@@ -185,3 +185,45 @@ fn ambiguous_unicode_protected_global_destination_prevents_directory_creation()
     assert!(!host.config_dir.exists());
     assert!(!host.protected.unwrap().exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn protected_hard_link_retains_inode_and_contents_after_atomic_save() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = host(dir.path());
+    let protected = dir.path().join("protected.json");
+    std::fs::write(&protected, "original").unwrap();
+    let original = std::fs::metadata(&protected).unwrap();
+    std::fs::hard_link(&protected, &host.local).unwrap();
+    host.protected = Some(protected.clone());
+    assert!(host.allowed(SaveTarget::Local).unwrap());
+    host.save(&document(), SaveTarget::Local).unwrap();
+    assert_eq!(std::fs::read_to_string(&protected).unwrap(), "original");
+    assert_eq!(std::fs::metadata(&protected).unwrap().ino(), original.ino());
+    assert_ne!(
+        std::fs::metadata(&host.local).unwrap().ino(),
+        original.ino()
+    );
+    assert_eq!(
+        crate::commands::read_canonical(&host.local).unwrap(),
+        document().labels().unwrap()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn uncertain_linux_case_alias_refuses_first_global_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = host(dir.path());
+    host.config_dir = dir.path().join("Config");
+    host.protected = Some(dir.path().join("CONFIG/LABELS.JSON"));
+    let error = host.save(&document(), SaveTarget::Global).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("could not compare Save destinations")
+    );
+    assert!(!host.config_dir.exists());
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}

@@ -221,7 +221,10 @@ its replacement. Save preserves undo/redo and the original dirty state. Sync may
 explicitly Save back to its loaded deck. Export disables any Save destination
 that aliases its final output file, including Save Local for the default export.
 Standalone Edit disables Save destinations that alias its file source. Aliases
-are checked again when saving; filesystem errors are reported.
+are checked again when saving; filesystem errors are reported. On Linux,
+uncertain casefold aliases are refused rather than assuming case-sensitive
+directories. Distinct hard links remain safe: Save replaces one directory entry
+and preserves the other link's contents.
 
 Final Export, Apply, or Copy needs confirmation. Export retains `--file`,
 `--global`, and `--force` rules, including overwrite protection at write time.

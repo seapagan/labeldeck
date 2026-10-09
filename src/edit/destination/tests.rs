@@ -54,6 +54,17 @@ fn final_case_alias_comparison_respects_existing_filesystem() {
     let lower = dir.path().join("labels.json");
     let upper = dir.path().join("LABELS.JSON");
     std::fs::write(&lower, "[]").unwrap();
+    #[cfg(target_os = "linux")]
+    if upper.exists()
+        && std::fs::canonicalize(&lower).unwrap()
+            != std::fs::canonicalize(&upper).unwrap()
+    {
+        assert_eq!(
+            same_destination(&lower, &upper).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        return;
+    }
     assert_eq!(same_destination(&lower, &upper).unwrap(), upper.exists());
 }
 
@@ -186,4 +197,41 @@ fn missing_final_case_aliases_respect_the_macos_volume() {
         .unwrap(),
         insensitive
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_entry_evidence_distinguishes_hard_links_from_uncertain_aliases() {
+    use std::ffi::{OsStr, OsString};
+    let left = Some(OsStr::new("labels.json"));
+    let right = Some(OsStr::new("LABELS.JSON"));
+    let names = vec![OsString::from("labels.json")];
+    assert_eq!(
+        distinct_linux_entries(left, right, &names)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Unsupported
+    );
+    let names =
+        vec![OsString::from("labels.json"), OsString::from("LABELS.JSON")];
+    assert!(!distinct_linux_entries(left, right, &names).unwrap());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_missing_case_aliases_report_uncertainty_without_creating_parents() {
+    let dir = tempfile::tempdir().unwrap();
+    for (left, right) in [
+        ("labels.json", "LABELS.JSON"),
+        ("missing/labels.json", "MISSING/LABELS.JSON"),
+        ("Étage/labels.json", "étage/labels.json"),
+    ] {
+        assert_eq!(
+            same_destination(&dir.path().join(left), &dir.path().join(right))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Unsupported
+        );
+    }
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
 }

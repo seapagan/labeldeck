@@ -6,7 +6,7 @@ use std::{
 
 struct Resolved {
     path: PathBuf,
-    #[cfg(any(windows, target_os = "macos", test))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
     ancestor: PathBuf,
 }
 
@@ -21,9 +21,90 @@ pub fn same_destination(left: &Path, right: &Path) -> io::Result<bool> {
     {
         same_resolved(&left, &right, case_insensitive)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        same_linux(&left, &right)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         Ok(left.path == right.path)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn same_linux(left: &Resolved, right: &Resolved) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    if left.path == right.path {
+        return Ok(true);
+    }
+    let left_meta = std::fs::metadata(&left.ancestor)?;
+    let right_meta = std::fs::metadata(&right.ancestor)?;
+    if (left_meta.dev(), left_meta.ino())
+        != (right_meta.dev(), right_meta.ino())
+    {
+        return Ok(false);
+    }
+    if left_meta.is_file() {
+        return same_linux_entry(&left.path, &right.path);
+    }
+    let left_suffix = left
+        .path
+        .strip_prefix(&left.ancestor)
+        .map_err(io::Error::other)?;
+    let right_suffix = right
+        .path
+        .strip_prefix(&right.ancestor)
+        .map_err(io::Error::other)?;
+    if left_suffix == right_suffix {
+        return Ok(true);
+    }
+    if compare_missing_case(left_suffix, right_suffix)? {
+        return Err(uncertain_linux_alias());
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "linux")]
+fn uncertain_linux_alias() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "cannot establish Save directory-entry identity on a potentially casefolded Linux directory",
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn same_linux_entry(left: &Path, right: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let left_parent = left.parent().ok_or_else(uncertain_linux_alias)?;
+    let right_parent = right.parent().ok_or_else(uncertain_linux_alias)?;
+    let a = std::fs::metadata(left_parent)?;
+    let b = std::fs::metadata(right_parent)?;
+    if (a.dev(), a.ino()) != (b.dev(), b.ino()) {
+        return Ok(false); // Distinct hard-link entries; rename replaces only one.
+    }
+    if left.file_name() == right.file_name() {
+        return Ok(true);
+    }
+    let names = std::fs::read_dir(left_parent)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<io::Result<Vec<_>>>()?;
+    distinct_linux_entries(left.file_name(), right.file_name(), &names)
+}
+
+#[cfg(target_os = "linux")]
+fn distinct_linux_entries(
+    left: Option<&std::ffi::OsStr>,
+    right: Option<&std::ffi::OsStr>,
+    names: &[std::ffi::OsString],
+) -> io::Result<bool> {
+    let exact =
+        |name| names.iter().any(|entry| Some(entry.as_os_str()) == name);
+    if exact(left) && exact(right) {
+        Ok(false)
+    } else {
+        // A shared inode with different lookup spellings may be one casefolded
+        // entry or distinct hard links. Refuse rather than equating the paths.
+        Err(uncertain_linux_alias())
     }
 }
 
@@ -46,7 +127,7 @@ fn same_resolved(
     Ok(true)
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 fn compare_missing_case(left: &Path, right: &Path) -> io::Result<bool> {
     if left.components().count() != right.components().count() {
         return Ok(false);
@@ -172,14 +253,24 @@ fn resolve(path: &Path) -> io::Result<Resolved> {
         match std::fs::symlink_metadata(&ancestor) {
             Ok(_) => {
                 let mut resolved = std::fs::canonicalize(&ancestor)?;
-                #[cfg(any(windows, target_os = "macos", test))]
+                #[cfg(any(
+                    windows,
+                    target_os = "macos",
+                    target_os = "linux",
+                    test
+                ))]
                 let ancestor = resolved.clone();
                 for component in suffix.into_iter().rev() {
                     resolved.push(component);
                 }
                 return Ok(Resolved {
                     path: resolved,
-                    #[cfg(any(windows, target_os = "macos", test))]
+                    #[cfg(any(
+                        windows,
+                        target_os = "macos",
+                        target_os = "linux",
+                        test
+                    ))]
                     ancestor,
                 });
             }
