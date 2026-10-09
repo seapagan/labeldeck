@@ -133,18 +133,21 @@ pub fn run_interactive(
     )
 }
 
-pub fn interactive_with(
+pub fn interactive_with<D>(
     client: &crate::github::GitHubClient,
     repo: &crate::github::RepoSpec,
     destination: &std::path::Path,
     force: bool,
     global: bool,
     config_dir: &std::path::Path,
-    driver: impl FnOnce(
+    driver: D,
+) -> Result<i32>
+where
+    D: FnOnce(
         crate::edit::ui::UiState,
         crate::edit::session::SaveHost,
     ) -> crate::edit::session::SessionResult,
-) -> Result<i32> {
+{
     use crate::edit::{
         model::Document,
         session::SaveHost,

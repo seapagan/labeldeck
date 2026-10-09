@@ -82,15 +82,42 @@ fn compare_missing_case(left: &Path, right: &Path) -> io::Result<bool> {
 fn case_insensitive(directory: &Path) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::metadata(directory)?;
-    let device = metadata.dev();
-    // A directory's spelling probes its parent's filesystem. Do not infer
-    // a mounted volume's policy from the filesystem containing its mount point.
-    if let Some(parent) = directory.parent()
-        && std::fs::metadata(parent)?.dev() == device
-        && let Some(result) = directory_case_alias(directory, &metadata)?
+    if let Some(result) = parent_case_probe(directory, &metadata)? {
+        return Ok(result);
+    }
+    if let Some(result) =
+        child_directory_case_probe(directory, metadata.dev())?
     {
         return Ok(result);
     }
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "could not probe filesystem case aliases without creating a directory",
+    ))
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn parent_case_probe(
+    directory: &Path,
+    metadata: &std::fs::Metadata,
+) -> io::Result<Option<bool>> {
+    use std::os::unix::fs::MetadataExt;
+    // A directory's spelling probes its parent's filesystem. Do not infer
+    // a mounted volume's policy from the filesystem containing its mount point.
+    if let Some(parent) = directory.parent()
+        && std::fs::metadata(parent)?.dev() == metadata.dev()
+    {
+        return directory_case_alias(directory, metadata);
+    }
+    Ok(None)
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn child_directory_case_probe(
+    directory: &Path,
+    device: u64,
+) -> io::Result<Option<bool>> {
+    use std::os::unix::fs::MetadataExt;
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         let metadata = std::fs::symlink_metadata(entry.path())?;
@@ -100,13 +127,10 @@ fn case_insensitive(directory: &Path) -> io::Result<bool> {
             && let Some(result) =
                 directory_case_alias(&entry.path(), &metadata)?
         {
-            return Ok(result);
+            return Ok(Some(result));
         }
     }
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "could not probe filesystem case aliases without creating a directory",
-    ))
+    Ok(None)
 }
 
 #[cfg(any(target_os = "macos", all(test, unix)))]
