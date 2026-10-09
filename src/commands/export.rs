@@ -153,6 +153,7 @@ where
         session::SaveHost,
         ui::{FinalSelection, UiAction, UiState},
     };
+    crate::staged_write::preflight(destination, force)?;
     let labels = remote_labels(client, repo)?;
     let level = colored_text::ColorizeConfig::color_level(
         colored_text::RenderTarget::Stdout,

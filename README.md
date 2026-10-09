@@ -206,7 +206,7 @@ operations, but Edit remains available.
 
 Edit changes the working copy. It does not write to the repository, sync's loaded
 deck, or copy's SOURCE. Enter, `e`, `n`, Delete, and Ctrl-Z/Y keep their standalone
-edit meanings. Done or list-level Esc validates the full deck and returns to
+edit meanings. Done, list-level Esc, or `q` validates the full deck and returns to
 Select; Esc in a form discards only that form. Selected Only stays off while
 editing and resumes its previous setting on return. Export keeps selection by
 label identity through edits, deletion/undo, and creation/redo. Sync/copy rebuild

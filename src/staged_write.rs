@@ -214,6 +214,14 @@ fn post_commit_outcome(
     }
 }
 
+/// Non-mutating convenience check; the exclusive commit remains authoritative.
+pub(crate) fn preflight(dest: &Path, force: bool) -> Result<()> {
+    if examine_destination(dest)?.is_some() && !force {
+        return Err(Error::OutputExists { path: dest.into() });
+    }
+    Ok(())
+}
+
 /// Resolve the path the commit will actually act on.
 ///
 /// Without `force` this is always the given path unchanged: the

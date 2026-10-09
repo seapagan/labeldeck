@@ -55,9 +55,12 @@ impl UiState {
                 | KeyModifiers::META,
         );
         if self.small {
-            return (!shortcut_modifier
-                && matches!(key.code, KeyCode::Esc | KeyCode::Char('q')))
-            .then_some(UiAction::Cancel);
+            if !shortcut_modifier
+                && matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+            {
+                return self.key(key);
+            }
+            return None;
         }
         if self.modal.is_some() {
             return self.modal_key(key);
@@ -128,7 +131,9 @@ impl UiState {
             return self.select_key(code);
         }
         match code {
-            KeyCode::Esc if self.session != SessionKind::Edit => {
+            KeyCode::Esc | KeyCode::Char('q')
+                if self.session != SessionKind::Edit =>
+            {
                 self.done();
             }
             KeyCode::Char('q') | KeyCode::Esc => {

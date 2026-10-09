@@ -359,3 +359,88 @@ fn focus_skips_unavailable_history_and_apply() {
         Some(UiAction::Cancel)
     ));
 }
+
+fn interactive_state(session: SessionKind) -> UiState {
+    let document = state().document;
+    let mut ui = if session == SessionKind::Export {
+        UiState::export(
+            document,
+            "source".into(),
+            "out.json".into(),
+            ColorLevel::NoColor,
+        )
+    } else {
+        UiState::reconcile(
+            document,
+            "target".into(),
+            session,
+            vec![],
+            false,
+            ColorLevel::NoColor,
+        )
+        .unwrap()
+    };
+    ui.edit_workspace();
+    ui
+}
+
+#[test]
+fn interactive_edit_exit_keys_validate_and_preserve_history_and_saves() {
+    for session in [SessionKind::Export, SessionKind::Sync, SessionKind::Copy]
+    {
+        for code in [KeyCode::Esc, KeyCode::Char('q')] {
+            for small in [false, true] {
+                let mut ui = interactive_state(session);
+                ui.document.delete(0);
+                ui.record_save(Ok(crate::edit::session::SaveRecord {
+                    path: "saved.json".into(),
+                    warning: None,
+                }));
+                if small {
+                    ui.resize(20, 5);
+                }
+                assert!(key(&mut ui, code, KeyModifiers::NONE).is_none());
+                assert_eq!(ui.workspace, WorkspaceMode::Select);
+                assert!(ui.document.can_undo());
+                assert_eq!(ui.saves.len(), 1);
+                ui.document.undo();
+                assert_eq!(ui.document.labels().unwrap().len(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn interactive_edit_exit_rejects_invalid_full_document() {
+    for code in [KeyCode::Esc, KeyCode::Char('q')] {
+        let mut ui = interactive_state(SessionKind::Export);
+        ui.document = crate::edit::model::Document::from_labels(vec![
+            state().document.labels().unwrap()[0].clone(),
+            state().document.labels().unwrap()[0].clone(),
+        ]);
+        assert!(key(&mut ui, code, KeyModifiers::NONE).is_none());
+        assert_eq!(ui.workspace, WorkspaceMode::Edit);
+        assert!(matches!(ui.message, Some(super::super::Message::Error(_))));
+    }
+}
+
+#[test]
+fn q_remains_input_or_cancel_outside_interactive_edit_list() {
+    let mut ui = interactive_state(SessionKind::Export);
+    ui.start_edit();
+    assert!(key(&mut ui, KeyCode::Char('q'), KeyModifiers::NONE).is_none());
+    let Mode::Edit(form) = &ui.mode else {
+        panic!("expected form")
+    };
+    assert_eq!(form.draft().name, "bugq");
+    ui.mode = Mode::List;
+    ui.done();
+    assert!(matches!(
+        key(&mut ui, KeyCode::Char('q'), KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+    assert!(matches!(
+        key(&mut state(), KeyCode::Char('q'), KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+}

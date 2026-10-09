@@ -390,3 +390,20 @@ mod symlink_tests {
         assert!(staging_leftovers(guard.path()).is_empty());
     }
 }
+
+#[test]
+fn export_preflight_distinguishes_missing_parents_from_io_errors() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing/config/labels.json");
+    preflight(&missing, false).unwrap();
+    assert!(!missing.parent().unwrap().exists());
+    let file = root.path().join("file");
+    std::fs::write(&file, "original").unwrap();
+    for force in [false, true] {
+        assert!(matches!(
+            preflight(&file.join("labels.json"), force),
+            Err(Error::Io { .. })
+        ));
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+}

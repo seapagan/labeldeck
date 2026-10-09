@@ -206,3 +206,77 @@ fn saved_deck_survives_final_export_failure() {
     assert!(root.path().join("labels.json").exists());
     mock.assert_satisfied();
 }
+
+#[test]
+fn occupied_export_fails_before_fetch_or_driver_without_force() {
+    let root = tempfile::tempdir_in(".").unwrap();
+    let path = root.path().join("deck.json");
+    std::fs::write(&path, "original").unwrap();
+    let client = GitHubClient::with_options("http://127.0.0.1:1", None, true);
+    let result = interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        &path,
+        false,
+        false,
+        root.path(),
+        |_, _| panic!("driver must not run"),
+    );
+    assert!(matches!(
+        result,
+        Err(labeldeck::error::Error::OutputExists { .. })
+    ));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn force_allows_existing_export_into_session_without_writing() {
+    let mock = source();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("labels.json");
+    std::fs::write(&path, "original").unwrap();
+    let client = GitHubClient::with_options(mock.base_url(), None, true);
+    interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        &path,
+        true,
+        true,
+        root.path(),
+        |_, _| SessionResult {
+            outcome: Ok(UiAction::Cancel),
+            saves: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
+    mock.assert_satisfied();
+}
+
+#[cfg(unix)]
+#[test]
+fn dangling_export_symlink_is_occupied_before_fetch() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("labels.json");
+    std::os::unix::fs::symlink("missing.json", &path).unwrap();
+    let client = GitHubClient::with_options("http://127.0.0.1:1", None, true);
+    let result = interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        &path,
+        false,
+        true,
+        root.path(),
+        |_, _| panic!("driver must not run"),
+    );
+    assert!(matches!(
+        result,
+        Err(labeldeck::error::Error::OutputExists { .. })
+    ));
+    assert_eq!(
+        std::fs::read_link(path).unwrap(),
+        std::path::Path::new("missing.json")
+    );
+    assert!(!root.path().join("missing.json").exists());
+}
