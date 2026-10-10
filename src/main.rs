@@ -3,6 +3,7 @@
 use clap::Parser;
 use labeldeck::cli::{AuthCommand, Cli, Command};
 use labeldeck::commands;
+use labeldeck::deck::ReadSource;
 
 fn main() {
     let cli = Cli::parse();
@@ -35,8 +36,11 @@ fn main() {
             no_prune,
         } => commands::diff::run(
             &repo,
-            file.as_ref(),
-            global,
+            match (file.as_deref(), global) {
+                (Some(path), _) => ReadSource::File(path),
+                (None, true) => ReadSource::Global,
+                (None, false) => ReadSource::Auto,
+            },
             labeldeck::cli::prune_override(prune, no_prune),
             cli.no_proxy,
         ),
@@ -56,8 +60,11 @@ fn main() {
             };
             run(
                 &repo,
-                file.as_ref(),
-                global,
+                match (file.as_deref(), global) {
+                    (Some(path), _) => ReadSource::File(path),
+                    (None, true) => ReadSource::Global,
+                    (None, false) => ReadSource::Auto,
+                },
                 labeldeck::cli::prune_override(prune, no_prune),
                 dry_run,
                 cli.no_proxy,

@@ -31,6 +31,17 @@ pub fn local_deck_path() -> PathBuf {
     PathBuf::from(DECK_FILE_NAME)
 }
 
+/// Mutually exclusive source requested by a read command.
+#[derive(Debug, Clone, Copy)]
+pub enum ReadSource<'a> {
+    /// Prefer the local deck, then fall back to the global deck.
+    Auto,
+    /// Use this path verbatim, without fallback.
+    File(&'a Path),
+    /// Use the global deck, without fallback.
+    Global,
+}
+
 /// The deck a read command selected, retaining *how* it was chosen so
 /// callers can act on the distinction (e.g. dry-run suggestions).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,25 +77,20 @@ impl DeckSelection {
 /// probe so tests can exercise every probe outcome (including I/O
 /// failures) without filesystem tricks.
 fn resolve_read_with(
-    explicit: Option<&Path>,
-    use_global: bool,
+    source: ReadSource<'_>,
     local: &Path,
     global: &Path,
     mut probe: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<DeckSelection> {
-    if explicit.is_some() && use_global {
-        return Err(Error::Usage(
-            "--file and --global are mutually exclusive".into(),
-        ));
-    }
-    if let Some(path) = explicit {
-        // Explicit paths are selected verbatim; whether they are
-        // readable/valid is the read step's business, not selection's.
-        return Ok(DeckSelection::Explicit(path.to_path_buf()));
-    }
-    if use_global {
-        // Like --file, explicit --global leaves read errors to the read step.
-        return Ok(DeckSelection::Global(global.to_path_buf()));
+    // Explicit selections leave read errors to the read step.
+    match source {
+        ReadSource::File(path) => {
+            return Ok(DeckSelection::Explicit(path.to_path_buf()));
+        }
+        ReadSource::Global => {
+            return Ok(DeckSelection::Global(global.to_path_buf()));
+        }
+        ReadSource::Auto => {}
     }
     // A probe that errors (permissions on a parent directory, I/O
     // failure, ...) must be reported, never treated as "absent".
@@ -141,13 +147,11 @@ pub fn probe_entry(path: &Path) -> std::io::Result<bool> {
 /// reported for the path probed. When neither default exists the error
 /// names both checked locations and how to fix the situation.
 pub fn resolve_read_selection(
-    explicit: Option<&Path>,
-    global: bool,
+    source: ReadSource<'_>,
     config_dir: &Path,
 ) -> Result<DeckSelection> {
     resolve_read_with(
-        explicit,
-        global,
+        source,
         &local_deck_path(),
         &global_deck_path(config_dir),
         probe_entry,
@@ -220,10 +224,10 @@ mod tests {
     fn probe_with(
         local_result: Result<bool, std::io::ErrorKind>,
         global_result: Result<bool, std::io::ErrorKind>,
-    ) -> impl Fn(Option<&Path>, &Path, &Path) -> Result<DeckSelection> {
-        move |explicit: Option<&Path>, local: &Path, global: &Path| {
+    ) -> impl Fn(ReadSource<'_>, &Path, &Path) -> Result<DeckSelection> {
+        move |source: ReadSource<'_>, local: &Path, global: &Path| {
             let mut probes = 0;
-            resolve_read_with(explicit, false, local, global, move |path| {
+            resolve_read_with(source, local, global, move |path| {
                 probes += 1;
                 let outcome = if path == local {
                     local_result
@@ -237,35 +241,24 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_read_sources_fail_before_any_probe() {
-        let sandbox = Sandbox::new();
-        let explicit = sandbox.root.join("absent-explicit.json");
-        let local = sandbox.root.join("absent-local.json");
-        let global = sandbox.root.join("absent-global.json");
-        let error =
-            resolve_read_with(Some(&explicit), true, &local, &global, |_| {
-                panic!("conflicting sources must not probe any path")
-            })
-            .unwrap_err();
-        assert!(matches!(error, Error::Usage(_)));
-        assert_eq!(
-            error.to_string(),
-            "--file and --global are mutually exclusive"
-        );
-        assert_eq!(error.exit_code(), 2);
-    }
-
-    #[test]
-    fn read_selection_rejects_conflicting_sources() {
+    fn read_selection_preserves_explicit_file_without_requiring_it_to_exist() {
         let sandbox = Sandbox::new();
         let explicit = sandbox.root.join("absent-explicit.json");
         let config_dir = sandbox.root.join("absent-config");
-        let error = resolve_read_selection(Some(&explicit), true, &config_dir)
-            .unwrap_err();
-        assert!(matches!(error, Error::Usage(_)));
         assert_eq!(
-            error.to_string(),
-            "--file and --global are mutually exclusive"
+            resolve_read_selection(ReadSource::File(&explicit), &config_dir)
+                .unwrap(),
+            DeckSelection::Explicit(explicit)
+        );
+    }
+
+    #[test]
+    fn read_selection_selects_global_without_requiring_it_to_exist() {
+        let sandbox = Sandbox::new();
+        let config_dir = sandbox.root.join("absent-config");
+        assert_eq!(
+            resolve_read_selection(ReadSource::Global, &config_dir).unwrap(),
+            DeckSelection::Global(global_deck_path(&config_dir))
         );
     }
 
@@ -278,7 +271,7 @@ mod tests {
         let missing = sandbox.dir("absent-global").join(DECK_FILE_NAME);
         for global in [existing, missing] {
             let selection =
-                resolve_read_with(None, true, &local, &global, |_| {
+                resolve_read_with(ReadSource::Global, &local, &global, |_| {
                     panic!("explicit --global must not probe any path")
                 })
                 .unwrap();
@@ -297,14 +290,22 @@ mod tests {
         let never = Err(std::io::ErrorKind::PermissionDenied);
         let resolver = probe_with(never, never);
         assert_eq!(
-            resolver(Some(&explicit), &sandbox.deck("ignored"), &global)
-                .unwrap(),
+            resolver(
+                ReadSource::File(&explicit),
+                &sandbox.deck("ignored"),
+                &global
+            )
+            .unwrap(),
             DeckSelection::Explicit(explicit)
         );
         let missing = sandbox.dir("explicit").join("absent.json");
         assert_eq!(
-            resolver(Some(&missing), &sandbox.deck("ignored"), &global)
-                .unwrap(),
+            resolver(
+                ReadSource::File(&missing),
+                &sandbox.deck("ignored"),
+                &global
+            )
+            .unwrap(),
             DeckSelection::Explicit(missing)
         );
     }
@@ -317,7 +318,7 @@ mod tests {
         let resolver =
             probe_with(Ok(true), Err(std::io::ErrorKind::PermissionDenied));
         assert_eq!(
-            resolver(None, &local, &global).unwrap(),
+            resolver(ReadSource::Auto, &local, &global).unwrap(),
             DeckSelection::Local(local)
         );
     }
@@ -329,7 +330,7 @@ mod tests {
         let global = sandbox.deck("global-home");
         let resolver = probe_with(Ok(false), Ok(true));
         assert_eq!(
-            resolver(None, &local, &global).unwrap(),
+            resolver(ReadSource::Auto, &local, &global).unwrap(),
             DeckSelection::Global(global)
         );
     }
@@ -339,8 +340,12 @@ mod tests {
         let sandbox = Sandbox::new();
         let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
         let global = sandbox.dir("empty-global").join(DECK_FILE_NAME);
-        let error = probe_with(Ok(false), Ok(false))(None, &local, &global)
-            .unwrap_err();
+        let error = probe_with(Ok(false), Ok(false))(
+            ReadSource::Auto,
+            &local,
+            &global,
+        )
+        .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("labels.json"), "{message}");
         assert!(
@@ -359,7 +364,7 @@ mod tests {
         let error = probe_with(
             Err(std::io::ErrorKind::PermissionDenied),
             Ok(true),
-        )(None, &local, &global)
+        )(ReadSource::Auto, &local, &global)
         .unwrap_err();
         let message = error.to_string();
         assert!(
@@ -384,7 +389,7 @@ mod tests {
         let error = probe_with(
             Ok(false),
             Err(std::io::ErrorKind::PermissionDenied),
-        )(None, &local, &global)
+        )(ReadSource::Auto, &local, &global)
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("could not examine"), "{message}");
@@ -401,9 +406,8 @@ mod tests {
         let sandbox = Sandbox::new();
         let local = sandbox.deck("workdir");
         let global = sandbox.deck("global-home");
-        let explicit = None;
         assert_eq!(
-            resolve_read_with(explicit, false, &local, &global, probe_entry)
+            resolve_read_with(ReadSource::Auto, &local, &global, probe_entry)
                 .unwrap(),
             DeckSelection::Local(local)
         );
@@ -419,7 +423,7 @@ mod tests {
         std::fs::write(&local, "not json").unwrap();
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, false, &local, &global, probe_entry)
+            resolve_read_with(ReadSource::Auto, &local, &global, probe_entry)
                 .unwrap(),
             DeckSelection::Local(local)
         );
@@ -432,8 +436,7 @@ mod tests {
         let global = sandbox.deck("global-home");
         assert_eq!(
             resolve_read_with(
-                None,
-                false,
+                ReadSource::Auto,
                 &absent_local,
                 &global,
                 probe_entry

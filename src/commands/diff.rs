@@ -3,23 +3,19 @@
 use crate::commands::{
     github_client, read_canonical, remote_labels, repo_spec, resolve_token,
 };
+use crate::deck::ReadSource;
 use crate::error::Result;
 use crate::plan::{self, Plan};
 
 pub fn run(
     repo: &str,
-    file: Option<&std::path::PathBuf>,
-    global: bool,
+    source: ReadSource<'_>,
     cli_prune: Option<bool>,
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = crate::commands::config_dir()?;
-    let selection = crate::deck::resolve_read_selection(
-        file.map(std::path::PathBuf::as_path),
-        global,
-        &config_dir,
-    )?;
+    let selection = crate::deck::resolve_read_selection(source, &config_dir)?;
     let canonical = read_canonical(selection.path())?;
     selection.report_read();
     let config = crate::config::load(&config_dir)?;

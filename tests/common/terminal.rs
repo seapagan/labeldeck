@@ -37,12 +37,10 @@ pub fn terminal_in(
     });
     assert!(
         result.is_ok(),
-        "PTY session failed: {result:?}; transcript ({} bytes), tail: {:?}",
+        "PTY session failed: {result:?}; transcript ({} bytes): {:?}",
         transcript.len(),
-        String::from_utf8_lossy(
-            &transcript[transcript.len().saturating_sub(2048)..]
-        )
-        .replace("test-token", "[redacted]")
+        String::from_utf8_lossy(&transcript)
+            .replace("test-token", "[redacted]")
     );
     String::from_utf8(transcript).expect("UTF-8 terminal transcript")
 }
@@ -67,7 +65,6 @@ fn command(isolation: &Isolation, args: &[&str], api: &str) -> CommandBuilder {
     command.env("LABELDECK_TOKEN", "test-token");
     command.env("NO_COLOR", "1");
     command.env("TERM", "xterm");
-    command.cwd(&isolation.config_dir);
     command
 }
 

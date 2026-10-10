@@ -5,24 +5,20 @@ use crate::commands::{
     config_dir, credentials_for_write, github_client, read_canonical,
     remote_labels, repo_spec, resolve_token,
 };
+use crate::deck::ReadSource;
 use crate::error::Result;
 use crate::github::RepoSpec;
 
 pub fn run(
     repo: &str,
-    file: Option<&std::path::PathBuf>,
-    global: bool,
+    source: ReadSource<'_>,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = config_dir()?;
-    let selection = crate::deck::resolve_read_selection(
-        file.map(std::path::PathBuf::as_path),
-        global,
-        &config_dir,
-    )?;
+    let selection = crate::deck::resolve_read_selection(source, &config_dir)?;
     let canonical = read_canonical(selection.path())?;
     selection.report_read();
     let config = crate::config::load(&config_dir)?;
@@ -61,8 +57,7 @@ pub fn run(
 /// Select a normal reconciliation plan; working edits never implicitly rewrite the source deck.
 pub fn run_interactive(
     repo: &str,
-    file: Option<&std::path::PathBuf>,
-    global: bool,
+    source: ReadSource<'_>,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
@@ -75,11 +70,7 @@ pub fn run_interactive(
     crate::edit::session::require_terminal("sync --interactive")?;
     let repo = repo_spec(repo)?;
     let config_dir = config_dir()?;
-    let selection = crate::deck::resolve_read_selection(
-        file.map(std::path::PathBuf::as_path),
-        global,
-        &config_dir,
-    )?;
+    let selection = crate::deck::resolve_read_selection(source, &config_dir)?;
     let canonical = read_canonical(selection.path())?;
     selection.report_read();
     let config = crate::config::load(&config_dir)?;
