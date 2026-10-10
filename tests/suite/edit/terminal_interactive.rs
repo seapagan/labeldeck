@@ -22,7 +22,23 @@ fn export_terminal_session_edits_saves_then_exports_empty_selection() {
             ("Confirm Export", "\t\r"),
         ],
     );
-    assert!(output.contains("Exported 0 labels"));
+    let exported =
+        std::fs::read_to_string(isolation.config_dir.join("out.json"));
+    let saved =
+        std::fs::read_to_string(isolation.config_dir.join("labels.json"));
+    eprintln!("Export file: {exported:?}; Saved deck: {saved:?}");
+    let requests: Vec<_> = mock
+        .requests()
+        .into_iter()
+        .map(|request| (request.method, request.path))
+        .collect();
+    eprintln!("Export HTTP requests: {requests:?}");
+    mock.assert_satisfied();
+    assert_eq!(
+        requests,
+        [("GET".into(), "/repos/o/r/labels?per_page=100".into())]
+    );
+    assert_eq!(exported.unwrap().trim(), "[]");
     assert!(isolation.config_dir.join("labels.json").exists());
     assert!(
         labeldeck::commands::read_canonical(
@@ -31,7 +47,7 @@ fn export_terminal_session_edits_saves_then_exports_empty_selection() {
         .unwrap()
         .is_empty()
     );
-    mock.assert_satisfied();
+    assert!(output.contains("Exported 0 labels"));
 }
 
 #[test]
@@ -90,14 +106,15 @@ fn sync_global_terminal_session_applies_global_with_local_present() {
     let body: serde_json::Value =
         serde_json::from_str(&mock.requests()[2].body).unwrap();
     assert_eq!(body["name"], "global");
+    eprintln!("Global sync posted label: {:?}", body["name"]);
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), global_deck);
+    assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
     let notice = format!("Using global deck: {global:?}");
     assert_eq!(output.matches("Using global deck:").count(), 1);
     assert!(output.contains(&notice));
     assert!(
         output.find(&notice).unwrap() < output.find("\x1b[?1049h").unwrap()
     );
-    assert_eq!(std::fs::read_to_string(global).unwrap(), global_deck);
-    assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
 }
 
 #[test]

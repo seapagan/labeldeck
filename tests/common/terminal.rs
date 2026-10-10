@@ -35,6 +35,7 @@ pub fn terminal_in(
     let result = Session::open(command).and_then(|mut session| {
         session.drive(steps, deadline, &mut transcript)
     });
+    report_transcript(&transcript);
     assert!(
         result.is_ok(),
         "PTY session failed: {result:?}\n{}",
@@ -150,6 +151,7 @@ impl Session {
                 status = self.child.try_wait()?;
                 if status.is_some() {
                     self.exited = true;
+                    eprintln!("PTY child exit: {:?}; closing console", status);
                     // ConPTY retains its output pipe until the console closes.
                     // The reader keeps draining while ClosePseudoConsole runs.
                     self.master.take();
@@ -206,6 +208,7 @@ struct Script {
     pending: Vec<u8>,
     query: Vec<u8>,
     step: usize,
+    received: usize,
 }
 
 impl Script {
@@ -215,6 +218,7 @@ impl Script {
         status: &portable_pty::ExitStatus,
         transcript: &[u8],
     ) -> io::Result<()> {
+        eprintln!("PTY finish: {}/{} steps; {status}", self.step, steps.len());
         if let Some((marker, _)) = steps.get(self.step) {
             return Err(io::Error::other(format!(
                 "unreached terminal step: {marker}"
@@ -237,6 +241,13 @@ impl Script {
         steps: &[(&str, &str)],
         writer: &mut dyn Write,
     ) -> io::Result<()> {
+        eprintln!(
+            "PTY read bytes {}..{}; EOF={}",
+            self.received,
+            self.received + chunk.len(),
+            chunk.is_empty()
+        );
+        self.received += chunk.len();
         self.pending.extend_from_slice(chunk);
         self.query.extend_from_slice(chunk);
         while let Some(index) =
@@ -248,8 +259,16 @@ impl Script {
         // Keep only a possible partial query across read boundaries.
         self.query.drain(..self.query.len().saturating_sub(3));
         if let Some((marker, keys)) = steps.get(self.step)
-            && contains(&self.pending, marker.as_bytes())
+            && let Some(index) = self
+                .pending
+                .windows(marker.len())
+                .position(|window| window == marker.as_bytes())
         {
+            eprintln!(
+                "PTY step {}: {marker:?} at byte {}; sending {keys:?}",
+                self.step,
+                self.received - self.pending.len() + index
+            );
             self.pending.clear();
             writer.write_all(keys.as_bytes())?;
             self.step += 1;
@@ -260,6 +279,40 @@ impl Script {
 
 fn contains(bytes: &[u8], marker: &[u8]) -> bool {
     bytes.windows(marker.len()).any(|window| window == marker)
+}
+
+fn report_transcript(transcript: &[u8]) {
+    // Test credentials only; retain escaped controls and cap screen dumps.
+    let text = String::from_utf8_lossy(transcript)
+        .replace("test-token", "[redacted]");
+    let bytes = text.as_bytes();
+    let limit = 8192;
+    eprintln!(
+        "PTY transcript ({} bytes), first excerpt: {:?}",
+        transcript.len(),
+        String::from_utf8_lossy(&bytes[..bytes.len().min(limit)])
+    );
+    if bytes.len() > limit {
+        eprintln!(
+            "PTY last excerpt: {:?}",
+            String::from_utf8_lossy(&bytes[bytes.len() - limit..])
+        );
+    }
+    for marker in [
+        "Using global deck:",
+        "\x1b[?1049h",
+        "\x1b[?1049l",
+        "Exported",
+        "Cancelled",
+        "0 / 1 labels selected",
+    ] {
+        let offsets: Vec<_> = transcript
+            .windows(marker.len())
+            .enumerate()
+            .filter_map(|(i, bytes)| (bytes == marker.as_bytes()).then_some(i))
+            .collect();
+        eprintln!("PTY marker {marker:?} byte offsets: {offsets:?}");
+    }
 }
 
 #[cfg(test)]
