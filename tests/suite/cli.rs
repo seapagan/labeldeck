@@ -39,7 +39,10 @@ fn version_reports_name_and_semver() {
     let isolation = Isolation::new("version");
     let output = run(&mut isolation.command(&["--version"]));
     assert!(output.status.success());
-    assert_eq!(stdout(&output), "labeldeck 0.1.0\n");
+    assert_eq!(
+        stdout(&output),
+        format!("labeldeck {}\n", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]

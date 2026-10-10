@@ -1,6 +1,6 @@
 [package]
 name = "labeldeck"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # Proven with cargo-msrv and independently verified against the full
 # gate (check + tests) on the exact toolchain.
@@ -32,11 +32,11 @@ pkg-fmt = "zip"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 colored_text = "=0.6.0"
-crossterm = { version = "=0.29.0", default-features = false, features = ["events", "bracketed-paste", "windows"] }
+crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events", "windows"] }
 dirs = "7.0.0"
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm_0_29"] }
 renamore = "0.3.2"
 rpassword = "7.5.4"
-ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm_0_29"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.21"
