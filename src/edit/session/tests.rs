@@ -227,3 +227,25 @@ fn uncertain_linux_case_alias_refuses_first_global_save() {
     assert!(!host.config_dir.exists());
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
 }
+
+#[test]
+fn invalid_protected_ancestor_blocks_save_before_writes_or_config_creation() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, "original").unwrap();
+    let mut host = host(root.path());
+    for suffix in ["out.json", "nested/out.json"] {
+        host.protected = Some(file.join(suffix));
+        for target in [SaveTarget::Local, SaveTarget::Global] {
+            assert!(host.allowed(target).is_err());
+            let error = host
+                .save_with(&document(), target, |_, _, _| {
+                    panic!("invalid protected ancestor must prevent writing")
+                })
+                .unwrap_err();
+            assert!(matches!(error, Error::Io { .. }));
+        }
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}

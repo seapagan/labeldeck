@@ -362,3 +362,33 @@ fn forced_export_rechecks_destination_after_session() {
     assert_eq!(std::fs::read_dir(path).unwrap().count(), 0);
     mock.assert_satisfied();
 }
+
+#[test]
+fn invalid_export_ancestor_fails_before_fetch_or_driver_in_both_modes() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, "original").unwrap();
+    let client = GitHubClient::with_options("http://127.0.0.1:1", None, true);
+    for force in [false, true] {
+        for suffix in ["out.json", "nested/out.json"] {
+            let path = file.join(suffix);
+            let result = interactive_with(
+                &client,
+                &RepoSpec::parse("o/r").unwrap(),
+                &path,
+                force,
+                false,
+                root.path(),
+                |_, _| panic!("driver must not run"),
+            );
+            let error = result.unwrap_err();
+            assert!(matches!(error, labeldeck::error::Error::Io { .. }));
+            assert!(
+                error.to_string().contains("could not examine"),
+                "{error}"
+            );
+        }
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}

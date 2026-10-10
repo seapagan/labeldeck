@@ -243,55 +243,12 @@ fn directory_case_alias(
 }
 
 fn resolve(path: &Path) -> io::Result<Resolved> {
-    let mut ancestor = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-    let mut suffix = Vec::new();
-    loop {
-        match std::fs::symlink_metadata(&ancestor) {
-            Ok(_) => {
-                let mut resolved = std::fs::canonicalize(&ancestor)?;
-                #[cfg(any(
-                    windows,
-                    target_os = "macos",
-                    target_os = "linux",
-                    test
-                ))]
-                let ancestor = resolved.clone();
-                for component in suffix.into_iter().rev() {
-                    resolved.push(component);
-                }
-                return Ok(Resolved {
-                    path: resolved,
-                    #[cfg(any(
-                        windows,
-                        target_os = "macos",
-                        target_os = "linux",
-                        test
-                    ))]
-                    ancestor,
-                });
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let name = ancestor
-                    .file_name()
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "could not resolve missing destination ancestor",
-                        )
-                    })?
-                    .to_owned();
-                suffix.push(name);
-                if !ancestor.pop() {
-                    return Err(error);
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
+    let (path, _ancestor) = crate::destination_path::resolve(path)?;
+    Ok(Resolved {
+        path,
+        #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
+        ancestor: _ancestor,
+    })
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod deck;
+mod destination_path;
 pub mod edit;
 pub mod error;
 pub mod github;

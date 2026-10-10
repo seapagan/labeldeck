@@ -235,3 +235,39 @@ fn linux_missing_case_aliases_report_uncertainty_without_creating_parents() {
     }
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
 }
+
+#[test]
+fn non_directory_ancestors_are_invalid_even_for_identical_paths() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, "original").unwrap();
+    for suffix in ["labels.json", "missing/config/labels.json"] {
+        let invalid = file.join(suffix);
+        assert!(same_destination(&invalid, &invalid).is_err());
+        assert!(
+            same_destination(&root.path().join("valid.json"), &invalid)
+                .is_err()
+        );
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn invalid_symlink_ancestors_propagate_errors_without_creating_suffixes() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), "original").unwrap();
+    for target in ["file", "missing"] {
+        let link = root.path().join(format!("link-{target}"));
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        for suffix in ["labels.json", "nested/labels.json"] {
+            assert!(
+                same_destination(&link.join(suffix), &link.join(suffix))
+                    .is_err()
+            );
+        }
+        assert_eq!(std::fs::read_link(link).unwrap(), Path::new(target));
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 3);
+}

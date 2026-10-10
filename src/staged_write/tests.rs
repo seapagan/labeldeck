@@ -488,3 +488,48 @@ fn preflight_rejects_unsupported_entries_and_symlink_targets() {
     assert_eq!(std::fs::read_link(link).unwrap(), Path::new("socket"));
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
 }
+
+#[test]
+fn preflight_rejects_immediate_and_deeper_non_directory_ancestors() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, "original").unwrap();
+    for force in [false, true] {
+        for suffix in ["labels.json", "missing/config/labels.json"] {
+            assert!(matches!(
+                preflight(&file.join(suffix), force),
+                Err(Error::Io { .. })
+            ));
+        }
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn preflight_validates_symlink_parents_without_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("dir")).unwrap();
+    std::fs::write(root.path().join("file"), "original").unwrap();
+    for target in ["dir", "file", "missing"] {
+        let link = root.path().join(format!("link-{target}"));
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        for force in [false, true] {
+            for suffix in ["labels.json", "nested/config/labels.json"] {
+                let result = preflight(&link.join(suffix), force);
+                if target == "dir" {
+                    result.unwrap();
+                } else {
+                    assert!(matches!(result, Err(Error::Io { .. })));
+                }
+            }
+        }
+        assert_eq!(std::fs::read_link(link).unwrap(), Path::new(target));
+    }
+    assert_eq!(
+        std::fs::read_dir(root.path().join("dir")).unwrap().count(),
+        0
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 5);
+}
