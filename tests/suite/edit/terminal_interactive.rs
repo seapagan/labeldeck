@@ -1,5 +1,5 @@
 //! Real terminal boundary tests; portable state/event contracts use TestBackend.
-use crate::common::terminal::terminal;
+use crate::common::terminal::{terminal, terminal_in};
 use crate::common::{Expectation, Isolation, labels_json, mock_github};
 
 #[test]
@@ -22,7 +22,19 @@ fn export_terminal_session_edits_saves_then_exports_empty_selection() {
             ("Confirm Export", "\t\r"),
         ],
     );
-    assert!(output.contains("Exported 0 labels"));
+    let exported =
+        std::fs::read_to_string(isolation.config_dir.join("out.json"));
+    let requests: Vec<_> = mock
+        .requests()
+        .into_iter()
+        .map(|request| (request.method, request.path))
+        .collect();
+    mock.assert_satisfied();
+    assert_eq!(
+        requests,
+        [("GET".into(), "/repos/o/r/labels?per_page=100".into())]
+    );
+    assert_eq!(exported.unwrap().trim(), "[]");
     assert!(isolation.config_dir.join("labels.json").exists());
     assert!(
         labeldeck::commands::read_canonical(
@@ -31,7 +43,7 @@ fn export_terminal_session_edits_saves_then_exports_empty_selection() {
         .unwrap()
         .is_empty()
     );
-    mock.assert_satisfied();
+    assert!(output.contains("Exported 0 labels"));
 }
 
 #[test]
@@ -57,6 +69,49 @@ fn sync_terminal_session_confirms_after_target_refetch() {
     );
     assert!(output.contains("Synchronized o/r"));
     mock.assert_satisfied();
+}
+
+#[test]
+fn sync_global_terminal_session_applies_global_with_local_present() {
+    let isolation = Isolation::new("interactive-pty-global-sync");
+    let dir = tempfile::tempdir().unwrap();
+    let global = isolation.config_dir.join("labels.json");
+    let local = dir.path().join("labels.json");
+    let global_deck =
+        "[{\"name\":\"global\",\"color\":\"ededed\",\"description\":\"\"}]";
+    let local_deck =
+        "[{\"name\":\"local\",\"color\":\"ededed\",\"description\":\"\"}]";
+    std::fs::write(&global, global_deck).unwrap();
+    std::fs::write(&local, local_deck).unwrap();
+    let page = Expectation::get("/repos/o/r/labels?per_page=100")
+        .labels_page("[]", None);
+    let mock = mock_github(vec![
+        page.clone(),
+        page,
+        Expectation::post("/repos/o/r/labels"),
+    ]);
+    let output = terminal_in(
+        &isolation,
+        &["sync", "o/r", "--global", "--interactive"],
+        mock.base_url(),
+        &[("labeldeck select", "f"), ("Confirm Apply", "\t\r")],
+        dir.path(),
+    );
+    assert!(output.contains("Synchronized o/r"));
+    mock.assert_satisfied();
+    let body: serde_json::Value =
+        serde_json::from_str(&mock.requests()[2].body).unwrap();
+    assert_eq!(body["name"], "global");
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), global_deck);
+    assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
+    let notice = format!("Using global deck: {global:?}");
+    // ConPTY can replay the main screen when the alternate screen closes.
+    let before_terminal = output
+        .split_once("\x1b[?1049h")
+        .expect("interactive sync must enter the alternate screen")
+        .0;
+    assert_eq!(before_terminal.matches("Using global deck:").count(), 1);
+    assert!(before_terminal.contains(&notice));
 }
 
 #[test]

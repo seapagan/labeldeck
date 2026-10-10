@@ -35,7 +35,7 @@ fn cursor_queries_are_answered_once_even_across_reads() {
 }
 
 #[test]
-fn builder_preserves_the_isolated_command() {
+fn builder_preserves_arguments_and_environment_without_setting_cwd() {
     let isolation = Isolation::new("pty-builder");
     let template = isolation.command(&["edit", "--file", "deck.json"]);
     let command = command(&isolation, &["edit", "--file", "deck.json"], "api");
@@ -43,10 +43,7 @@ fn builder_preserves_the_isolated_command() {
         .chain(template.get_args().map(std::ffi::OsStr::to_owned))
         .collect();
     assert_eq!(command.get_argv(), &argv);
-    assert_eq!(
-        command.get_cwd().map(std::ffi::OsString::as_os_str),
-        Some(isolation.config_dir.as_os_str())
-    );
+    assert!(command.get_cwd().is_none());
     assert_eq!(
         command.get_env("LABELDECK_CONFIG_DIR"),
         Some(isolation.config_dir.as_os_str())
@@ -125,12 +122,10 @@ fn successful_exit_without_alternate_screen_restoration_is_rejected() {
 fn expired_deadline_terminates_and_reaps_the_child() {
     let isolation = Isolation::new("pty-timeout");
     std::fs::write(isolation.config_dir.join("deck.json"), "[]").unwrap();
-    let mut session = Session::open(command(
-        &isolation,
-        &["edit", "--file", "deck.json"],
-        "api",
-    ))
-    .unwrap();
+    let mut command =
+        command(&isolation, &["edit", "--file", "deck.json"], "api");
+    command.cwd(&isolation.config_dir);
+    let mut session = Session::open(command).unwrap();
     assert!(session.child.try_wait().unwrap().is_none());
     let error = session
         .drive(

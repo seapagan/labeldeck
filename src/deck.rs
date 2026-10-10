@@ -3,13 +3,14 @@
 //! One place decides which `labels.json` a command reads or writes:
 //!
 //! ```text
-//! read:   --file PATH → local labels.json → global labels.json
+//! read:   --file PATH | --global | local labels.json → global labels.json
 //! export: --file - | --file PATH | --global | local labels.json
 //! ```
 //!
-//! The project-local deck wins over the global default; an explicit
-//! `--file` is authoritative and never falls back; fallback to the
-//! global deck happens only when the local default file is genuinely
+//! Without an explicit selection, the project-local deck wins over the
+//! global default. Both `--file` and `--global` are authoritative and
+//! never fall back; fallback to the global deck happens only when the
+//! local default file is genuinely
 //! absent (a present-but-invalid local deck is an error, not a reason
 //! to silently switch decks, and neither is a failing existence probe).
 
@@ -28,6 +29,17 @@ pub fn global_deck_path(config_dir: &Path) -> PathBuf {
 /// The local default deck in the current working directory.
 pub fn local_deck_path() -> PathBuf {
     PathBuf::from(DECK_FILE_NAME)
+}
+
+/// Mutually exclusive source requested by a read command.
+#[derive(Debug, Clone, Copy)]
+pub enum ReadSource<'a> {
+    /// Prefer the local deck, then fall back to the global deck.
+    Auto,
+    /// Use this path verbatim, without fallback.
+    File(&'a Path),
+    /// Use the global deck, without fallback.
+    Global,
 }
 
 /// The deck a read command selected, retaining *how* it was chosen so
@@ -51,21 +63,34 @@ impl DeckSelection {
             | DeckSelection::Global(path) => path,
         }
     }
+
+    /// Report a global source on stderr after its deck was read and validated.
+    pub fn report_read(&self) {
+        if let Self::Global(path) = self {
+            // Debug formatting quotes the path and escapes controls and non-UTF-8 bytes.
+            eprintln!("Using global deck: {path:?}");
+        }
+    }
 }
 
 /// Resolution core, parameterised by candidate paths and an existence
 /// probe so tests can exercise every probe outcome (including I/O
 /// failures) without filesystem tricks.
 fn resolve_read_with(
-    explicit: Option<&Path>,
+    source: ReadSource<'_>,
     local: &Path,
     global: &Path,
     mut probe: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<DeckSelection> {
-    if let Some(path) = explicit {
-        // Explicit paths are selected verbatim; whether they are
-        // readable/valid is the read step's business, not selection's.
-        return Ok(DeckSelection::Explicit(path.to_path_buf()));
+    // Explicit selections leave read errors to the read step.
+    match source {
+        ReadSource::File(path) => {
+            return Ok(DeckSelection::Explicit(path.to_path_buf()));
+        }
+        ReadSource::Global => {
+            return Ok(DeckSelection::Global(global.to_path_buf()));
+        }
+        ReadSource::Auto => {}
     }
     // A probe that errors (permissions on a parent directory, I/O
     // failure, ...) must be reported, never treated as "absent".
@@ -113,32 +138,24 @@ pub fn probe_entry(path: &Path) -> std::io::Result<bool> {
 /// Resolve the deck a read command (`diff`/`sync`) should use, and how
 /// it was chosen.
 ///
-/// Precedence: an explicit `--file` path verbatim; then the local
+/// Explicit `--file` and `--global` selections are authoritative and
+/// mutually exclusive; either selection bypasses all probes.
+/// Otherwise, precedence is the local
 /// `./labels.json` if a filesystem entry with that name exists; then
 /// the global deck likewise. Fallback happens only on a *confirmed*
 /// absence: an existence probe that fails with an I/O error is
 /// reported for the path probed. When neither default exists the error
 /// names both checked locations and how to fix the situation.
 pub fn resolve_read_selection(
-    explicit: Option<&Path>,
+    source: ReadSource<'_>,
     config_dir: &Path,
 ) -> Result<DeckSelection> {
     resolve_read_with(
-        explicit,
+        source,
         &local_deck_path(),
         &global_deck_path(config_dir),
         probe_entry,
     )
-}
-
-/// Resolve the deck a read command should use (path only).
-pub fn resolve_read_path(
-    explicit: Option<&Path>,
-    config_dir: &Path,
-) -> Result<PathBuf> {
-    Ok(resolve_read_selection(explicit, config_dir)?
-        .path()
-        .to_path_buf())
 }
 
 /// Resolve where `export` should write.
@@ -207,10 +224,10 @@ mod tests {
     fn probe_with(
         local_result: Result<bool, std::io::ErrorKind>,
         global_result: Result<bool, std::io::ErrorKind>,
-    ) -> impl Fn(Option<&Path>, &Path, &Path) -> Result<DeckSelection> {
-        move |explicit: Option<&Path>, local: &Path, global: &Path| {
+    ) -> impl Fn(ReadSource<'_>, &Path, &Path) -> Result<DeckSelection> {
+        move |source: ReadSource<'_>, local: &Path, global: &Path| {
             let mut probes = 0;
-            resolve_read_with(explicit, local, global, move |path| {
+            resolve_read_with(source, local, global, move |path| {
                 probes += 1;
                 let outcome = if path == local {
                     local_result
@@ -220,6 +237,45 @@ mod tests {
                 };
                 outcome.map_err(std::io::Error::from)
             })
+        }
+    }
+
+    #[test]
+    fn read_selection_preserves_explicit_file_without_requiring_it_to_exist() {
+        let sandbox = Sandbox::new();
+        let explicit = sandbox.root.join("absent-explicit.json");
+        let config_dir = sandbox.root.join("absent-config");
+        assert_eq!(
+            resolve_read_selection(ReadSource::File(&explicit), &config_dir)
+                .unwrap(),
+            DeckSelection::Explicit(explicit)
+        );
+    }
+
+    #[test]
+    fn read_selection_selects_global_without_requiring_it_to_exist() {
+        let sandbox = Sandbox::new();
+        let config_dir = sandbox.root.join("absent-config");
+        assert_eq!(
+            resolve_read_selection(ReadSource::Global, &config_dir).unwrap(),
+            DeckSelection::Global(global_deck_path(&config_dir))
+        );
+    }
+
+    #[test]
+    fn explicit_global_is_authoritative_without_probing_either_default() {
+        let sandbox = Sandbox::new();
+        let local = sandbox.deck("workdir");
+        // Both an existing and a missing global deck must bypass all probes.
+        let existing = sandbox.deck("global");
+        let missing = sandbox.dir("absent-global").join(DECK_FILE_NAME);
+        for global in [existing, missing] {
+            let selection =
+                resolve_read_with(ReadSource::Global, &local, &global, |_| {
+                    panic!("explicit --global must not probe any path")
+                })
+                .unwrap();
+            assert_eq!(selection, DeckSelection::Global(global));
         }
     }
 
@@ -234,14 +290,22 @@ mod tests {
         let never = Err(std::io::ErrorKind::PermissionDenied);
         let resolver = probe_with(never, never);
         assert_eq!(
-            resolver(Some(&explicit), &sandbox.deck("ignored"), &global)
-                .unwrap(),
+            resolver(
+                ReadSource::File(&explicit),
+                &sandbox.deck("ignored"),
+                &global
+            )
+            .unwrap(),
             DeckSelection::Explicit(explicit)
         );
         let missing = sandbox.dir("explicit").join("absent.json");
         assert_eq!(
-            resolver(Some(&missing), &sandbox.deck("ignored"), &global)
-                .unwrap(),
+            resolver(
+                ReadSource::File(&missing),
+                &sandbox.deck("ignored"),
+                &global
+            )
+            .unwrap(),
             DeckSelection::Explicit(missing)
         );
     }
@@ -254,7 +318,7 @@ mod tests {
         let resolver =
             probe_with(Ok(true), Err(std::io::ErrorKind::PermissionDenied));
         assert_eq!(
-            resolver(None, &local, &global).unwrap(),
+            resolver(ReadSource::Auto, &local, &global).unwrap(),
             DeckSelection::Local(local)
         );
     }
@@ -266,7 +330,7 @@ mod tests {
         let global = sandbox.deck("global-home");
         let resolver = probe_with(Ok(false), Ok(true));
         assert_eq!(
-            resolver(None, &local, &global).unwrap(),
+            resolver(ReadSource::Auto, &local, &global).unwrap(),
             DeckSelection::Global(global)
         );
     }
@@ -276,8 +340,12 @@ mod tests {
         let sandbox = Sandbox::new();
         let local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
         let global = sandbox.dir("empty-global").join(DECK_FILE_NAME);
-        let error = probe_with(Ok(false), Ok(false))(None, &local, &global)
-            .unwrap_err();
+        let error = probe_with(Ok(false), Ok(false))(
+            ReadSource::Auto,
+            &local,
+            &global,
+        )
+        .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("labels.json"), "{message}");
         assert!(
@@ -296,7 +364,7 @@ mod tests {
         let error = probe_with(
             Err(std::io::ErrorKind::PermissionDenied),
             Ok(true),
-        )(None, &local, &global)
+        )(ReadSource::Auto, &local, &global)
         .unwrap_err();
         let message = error.to_string();
         assert!(
@@ -321,7 +389,7 @@ mod tests {
         let error = probe_with(
             Ok(false),
             Err(std::io::ErrorKind::PermissionDenied),
-        )(None, &local, &global)
+        )(ReadSource::Auto, &local, &global)
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("could not examine"), "{message}");
@@ -338,9 +406,9 @@ mod tests {
         let sandbox = Sandbox::new();
         let local = sandbox.deck("workdir");
         let global = sandbox.deck("global-home");
-        let explicit = None;
         assert_eq!(
-            resolve_read_with(explicit, &local, &global, probe_entry).unwrap(),
+            resolve_read_with(ReadSource::Auto, &local, &global, probe_entry)
+                .unwrap(),
             DeckSelection::Local(local)
         );
     }
@@ -355,7 +423,8 @@ mod tests {
         std::fs::write(&local, "not json").unwrap();
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, &local, &global, probe_entry).unwrap(),
+            resolve_read_with(ReadSource::Auto, &local, &global, probe_entry)
+                .unwrap(),
             DeckSelection::Local(local)
         );
     }
@@ -366,8 +435,13 @@ mod tests {
         let absent_local = sandbox.dir("empty-workdir").join(DECK_FILE_NAME);
         let global = sandbox.deck("global-home");
         assert_eq!(
-            resolve_read_with(None, &absent_local, &global, probe_entry,)
-                .unwrap(),
+            resolve_read_with(
+                ReadSource::Auto,
+                &absent_local,
+                &global,
+                probe_entry
+            )
+            .unwrap(),
             DeckSelection::Global(global)
         );
     }

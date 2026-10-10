@@ -5,23 +5,22 @@ use crate::commands::{
     config_dir, credentials_for_write, github_client, read_canonical,
     remote_labels, repo_spec, resolve_token,
 };
+use crate::deck::ReadSource;
 use crate::error::Result;
 use crate::github::RepoSpec;
 
 pub fn run(
     repo: &str,
-    file: Option<&std::path::PathBuf>,
+    source: ReadSource<'_>,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = config_dir()?;
-    let selection = crate::deck::resolve_read_selection(
-        file.map(std::path::PathBuf::as_path),
-        &config_dir,
-    )?;
+    let selection = crate::deck::resolve_read_selection(source, &config_dir)?;
     let canonical = read_canonical(selection.path())?;
+    selection.report_read();
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
 
@@ -58,7 +57,7 @@ pub fn run(
 /// Select a normal reconciliation plan; working edits never implicitly rewrite the source deck.
 pub fn run_interactive(
     repo: &str,
-    file: Option<&std::path::PathBuf>,
+    source: ReadSource<'_>,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
@@ -71,11 +70,9 @@ pub fn run_interactive(
     crate::edit::session::require_terminal("sync --interactive")?;
     let repo = repo_spec(repo)?;
     let config_dir = config_dir()?;
-    let selection = crate::deck::resolve_read_selection(
-        file.map(std::path::PathBuf::as_path),
-        &config_dir,
-    )?;
+    let selection = crate::deck::resolve_read_selection(source, &config_dir)?;
     let canonical = read_canonical(selection.path())?;
+    selection.report_read();
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
     let credentials = credentials_for_write(
@@ -265,17 +262,21 @@ mod tests {
         let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
             b"bad\xff.json",
         ));
-        let guidance =
-            follow_up_command(&repo, &DeckSelection::Explicit(path), true);
-        assert!(!guidance.contains("labeldeck sync"));
-        // The invalid byte is shown as an escape, never silently
-        // rendered as a lossy replacement character.
-        assert!(
-            guidance.contains("bad\\xFF.json")
-                || guidance.contains("bad\\xff.json"),
-            "non-UTF-8 byte must be escaped: {guidance}"
-        );
-        assert!(!guidance.contains('\u{FFFD}'), "{guidance}");
+        for selection in [
+            DeckSelection::Explicit(path.clone()),
+            DeckSelection::Global(path),
+        ] {
+            let guidance = follow_up_command(&repo, &selection, true);
+            assert!(!guidance.contains("labeldeck sync"));
+            // The invalid byte is shown as an escape, never silently
+            // rendered as a lossy replacement character.
+            assert!(
+                guidance.contains("bad\\xFF.json")
+                    || guidance.contains("bad\\xff.json"),
+                "non-UTF-8 byte must be escaped: {guidance}"
+            );
+            assert!(!guidance.contains('\u{FFFD}'), "{guidance}");
+        }
     }
 
     #[test]

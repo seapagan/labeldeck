@@ -77,6 +77,12 @@ pub enum Command {
     },
 
     /// Compare a canonical label file with a repository, changing nothing
+    #[command(
+        after_help = "Uses ./labels.json, or the global deck when no local \
+                      entry exists. --global selects only the deck in the \
+                      labeldeck configuration directory, even when a local \
+                      deck exists; it conflicts with --file PATH."
+    )]
     Diff {
         /// Repository to compare with, as OWNER/REPO.
         repo: String,
@@ -84,6 +90,9 @@ pub enum Command {
         /// default deck.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
+        /// Use only the deck in the labeldeck configuration directory.
+        #[arg(long, conflicts_with = "file")]
+        global: bool,
         /// Delete target-only labels (overrides the configuration).
         #[arg(long, conflicts_with = "no_prune")]
         prune: bool,
@@ -99,7 +108,9 @@ pub enum Command {
                       target-only labels. The canonical deck is \
                       ./labels.json, or the global deck in the labeldeck \
                       configuration directory when no local file exists; \
-                      --file PATH uses that path exactly. Mutations pause \
+                      --global selects only the global deck, even when a \
+                      local deck exists, and conflicts with --file PATH, \
+                      which uses that path exactly. Mutations pause \
                       briefly between requests per GitHub's rate-limit \
                       guidance. Deletions remove labels from existing \
                       issues and pull requests; --dry-run shows the plan \
@@ -115,6 +126,9 @@ pub enum Command {
         /// default deck.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
+        /// Use only the deck in the labeldeck configuration directory.
+        #[arg(long, conflicts_with = "file")]
+        global: bool,
         /// Delete target-only labels (overrides the configuration).
         #[arg(long, conflicts_with = "no_prune")]
         prune: bool,

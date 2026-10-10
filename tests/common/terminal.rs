@@ -18,15 +18,29 @@ pub fn terminal(
     api: &str,
     steps: &[(&str, &str)],
 ) -> String {
+    terminal_in(isolation, args, api, steps, &isolation.config_dir)
+}
+
+pub fn terminal_in(
+    isolation: &Isolation,
+    args: &[&str],
+    api: &str,
+    steps: &[(&str, &str)],
+    cwd: &std::path::Path,
+) -> String {
     let deadline = Instant::now() + TIMEOUT;
     let mut transcript = Vec::new();
-    let result = Session::open(command(isolation, args, api)).and_then(
-        |mut session| session.drive(steps, deadline, &mut transcript),
-    );
+    let mut command = command(isolation, args, api);
+    command.cwd(cwd);
+    let result = Session::open(command).and_then(|mut session| {
+        session.drive(steps, deadline, &mut transcript)
+    });
     assert!(
         result.is_ok(),
-        "PTY session failed: {result:?}\n{}",
+        "PTY session failed: {result:?}; transcript ({} bytes): {:?}",
+        transcript.len(),
         String::from_utf8_lossy(&transcript)
+            .replace("test-token", "[redacted]")
     );
     String::from_utf8(transcript).expect("UTF-8 terminal transcript")
 }
@@ -51,7 +65,6 @@ fn command(isolation: &Isolation, args: &[&str], api: &str) -> CommandBuilder {
     command.env("LABELDECK_TOKEN", "test-token");
     command.env("NO_COLOR", "1");
     command.env("TERM", "xterm");
-    command.cwd(&isolation.config_dir);
     command
 }
 
