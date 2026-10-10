@@ -1,68 +1,84 @@
 # Contributing to labeldeck
 
-Thanks for considering a contribution.
+For a bug report, include your labeldeck version, operating system, reproduction
+steps, and expected result. Discuss larger changes in an issue before writing
+code. Keep each pull request focused on one fix or change, and open it against
+`main`. Describe the problem, the resulting behaviour, and the checks you ran;
+link the related issue. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
-## Development setup
+See the [README](README.md) for installation, CLI usage, and authentication.
 
-You need a recent stable Rust toolchain (see `rust-version` in
-`Cargo.toml` for the MSRV) plus these tools for the full local gate:
+## Local development
 
-```console
-$ cargo install cargo-make cargo-nextest cargo-llvm-cov
+Use stable Rust with rustfmt and Clippy. The minimum supported Rust version is
+**1.88.0**, declared in [Cargo.toml](Cargo.toml).
+
+For the full local gate, install `cargo-make`, `cargo-nextest`, `cargo-audit`,
+ShellCheck, PowerShell 7+ (`pwsh`), `actionlint`, and `zizmor`. Install the
+Rust 1.88.0 toolchain for the MSRV check.
+
+```sh
+cargo build --locked
+cargo make check
+cargo make test
+cargo make clippy
+cargo make format
 ```
 
-`actionlint`, `zizmor`, `shellcheck`, and `pwsh` (PowerShell 7+) are also
-required for the complete verification gate; on Ubuntu they are available
-via the usual package managers.
+For a focused integration test, use the `main` test target:
 
-## Everyday commands
-
-```console
-$ cargo make check      # cargo check, all targets/features
-$ cargo make test       # cargo-nextest
-$ cargo make clippy     # warnings denied
-$ cargo make format     # rustfmt check
-$ cargo make coverage   # LCOV + HTML coverage
+```sh
+cargo test --test main <test_name> --locked
 ```
 
-Before opening a PR, run the full gate:
+Before submitting a PR, run:
 
-```console
-$ cargo make verify
+```sh
+cargo make verify
 ```
 
-`verify` runs formatting, check, clippy, tests, docs, release build,
-package verification, MSRV verification, installer tests (POSIX and
-PowerShell), release-verifier tests, actionlint, and zizmor. CI runs the
-same gates on Linux, macOS, and Windows.
+See [Makefile.toml](Makefile.toml) for the task definitions. The full gate checks
+formatting, compilation, Clippy, tests, rustdoc, the release build, packaging,
+MSRV, dependency advisories, installer and release-verifier tests, and workflow
+linting. Packaging requires a committed working tree; during development, use
+`cargo package --locked --allow-dirty` to check your pending changes, then rerun
+`cargo make verify` after committing.
 
-## Project layout
+For an MSRV-sensitive change, check and test the locked dependency graph:
 
-- `src/labels.rs`, `src/canonical.rs` — label model and canonical JSON
-- `src/plan.rs`, `src/sync.rs` — planning and safe execution
-- `src/edit/` — document/history, rename planning, paced execution, colour adapter, and testable TUI
-- `src/github.rs` — direct GitHub REST client (ureq + rustls)
-- `src/config.rs`, `src/auth.rs` — configuration and token handling
-- `src/cli.rs`, `src/commands/` — clap interface and command UX
-- `tests/` — integration tests, including the local mock GitHub API
+```sh
+cargo +1.88.0 check --all-targets --all-features --locked
+cargo +1.88.0 test --all-targets --all-features --locked
+```
 
-## Testing rules
+For coverage, install `cargo-llvm-cov` and the Rust `llvm-tools-preview` component.
+Run `cargo make coverage` for `target/llvm-cov/coverage.lcov`, or
+`cargo make coverage-html` for `target/llvm-cov/html`.
 
-- Tests must not contact GitHub. Use the in-process mock server in
-  `tests/common/`.
-- Behaviour that guards destructive operations (pruning, overwrite
-  protection, partial-failure reporting) deserves direct tests.
-- The full suite must pass on Linux, macOS, and Windows.
+## Code and tests
+
+Keep changes small, use typed errors, and preserve CLI compatibility and
+deterministic output. Consider Linux, macOS, and Windows behaviour, including
+paths and shell quoting. Avoid unnecessary dependencies and async infrastructure.
+The crate forbids unsafe Rust.
+
+Add regression tests for bug fixes and behaviour changes. Prefer integration
+tests in `tests/suite/`; reuse the local mock GitHub API in `tests/common/` rather
+than contacting GitHub. Keep fixtures deterministic, use temporary directories
+with cleanup guards, and test pruning, overwrite protection, and partial failures
+when your change affects them.
+
+Update README and help text for user-visible changes. Leave `CHANGELOG.md` to the
+maintainer. For TUI changes, include terminal screenshots or a short recording.
+
+CI checks the Rust build and tests on Linux, macOS, and Windows, runs an MSRV
+check on Linux, and audits workflows with Zizmor. Installer and verifier checks
+vary by platform; see [the CI workflow](.github/workflows/ci.yml). Report local
+checks you could not run and let CI cover the native platforms you lack.
 
 ## Commits
 
-Conventional Commits style (`feat:`, `fix:`, `chore:`, …), signed off
-with `git commit -s`.
-
-## Releases
-
-Releases are cut by pushing a `vX.Y.Z` tag matching the crate version.
-The release workflow builds all targets, verifies binaries, produces
-checksummed archives with GitHub artifact attestations, and publishes an
-immutable release. See `.github/workflows/release.yml` and the
-installation section of the README. Do not publish releases manually.
+Follow the existing Conventional Commits and sign-off convention: use a scoped
+subject such as `fix: preserve label associations` or `docs: clarify setup`, and
+run `git commit -s` to add your `Signed-off-by` line. The maintainer uses GPG
+signatures; contributors do not need to adopt that practice to submit a PR.

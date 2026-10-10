@@ -34,14 +34,14 @@ labeldeck sync seapagan/lsplus
 
 ## Commands
 
-| Command | Use |
-|---------|-----|
-| `export OWNER/REPO` | Save repository labels to a JSON file |
-| `diff OWNER/REPO` | Compare a deck with repository labels |
-| `edit` | Edit a local or global deck, or live repository labels |
-| `sync OWNER/REPO` | Apply a deck to a repository |
-| `copy SOURCE TARGET` | Copy labels between repositories |
-| `auth login`, `auth status`, `auth logout` | Manage credentials |
+| Command                                    | Use                                                    |
+| ------------------------------------------ | ------------------------------------------------------ |
+| `export OWNER/REPO`                        | Save repository labels to a JSON file                  |
+| `diff OWNER/REPO`                          | Compare a deck with repository labels                  |
+| `edit`                                     | Edit a local or global deck, or live repository labels |
+| `sync OWNER/REPO`                          | Apply a deck to a repository                           |
+| `copy SOURCE TARGET`                       | Copy labels between repositories                       |
+| `auth login`, `auth status`, `auth logout` | Manage credentials                                     |
 
 Use `labeldeck --help` or `labeldeck COMMAND --help` for all options.
 Specify repositories as `OWNER/REPO`, not URLs.
@@ -114,22 +114,22 @@ Press `s` or click Save to save the full working deck to Local or Global.
 Save is independent of Apply and preserves undo/redo and the original dirty state.
 A Save target matching the current file source is disabled; Apply owns that file.
 
-| Keys | Action |
-|------|--------|
-| Up/Down, PageUp/PageDown | Select a label |
-| Enter or `e` | Edit the selected label |
-| `n` | Add a label |
-| Delete at list level | Delete the selected label |
-| `/` | Filter labels by case-insensitive name substring |
-| Up/Down or Tab/Shift-Tab in the form | Select another field |
-| Left/Right, Home/End, Backspace/Delete in the form | Move the cursor or edit text |
-| Enter in the form | Save all three fields |
-| Esc in the form | Cancel the form, including a new label |
-| Enter / Esc in the filter | Accept the filter / restore the previous filter |
-| Ctrl-Z / Ctrl-Y | Undo / Redo; discard unsaved form input first |
-| Tab/Shift-Tab at list level | Cycle buttons |
-| Ctrl-S / Apply | Open the Apply confirmation from the list after changes |
-| `q` or Esc at list level, Ctrl-C anywhere | Cancel |
+| Keys                                               | Action                                                  |
+| -------------------------------------------------- | ------------------------------------------------------- |
+| Up/Down, PageUp/PageDown                           | Select a label                                          |
+| Enter or `e`                                       | Edit the selected label                                 |
+| `n`                                                | Add a label                                             |
+| Delete at list level                               | Delete the selected label                               |
+| `/`                                                | Filter labels by case-insensitive name substring        |
+| Up/Down or Tab/Shift-Tab in the form               | Select another field                                    |
+| Left/Right, Home/End, Backspace/Delete in the form | Move the cursor or edit text                            |
+| Enter in the form                                  | Save all three fields                                   |
+| Esc in the form                                    | Cancel the form, including a new label                  |
+| Enter / Esc in the filter                          | Accept the filter / restore the previous filter         |
+| Ctrl-Z / Ctrl-Y                                    | Undo / Redo; discard unsaved form input first           |
+| Tab/Shift-Tab at list level                        | Cycle buttons                                           |
+| Ctrl-S / Apply                                     | Open the Apply confirmation from the list after changes |
+| `q` or Esc at list level, Ctrl-C anywhere          | Cancel                                                  |
 
 You can click rows, buttons, and fields, or scroll labels with the mouse wheel.
 In the confirmation, use Left/Right or Tab/Shift-Tab to select Apply or Back,
@@ -192,18 +192,18 @@ rows. It starts in Select with every candidate checked. Export selects labels;
 sync and copy select CREATE, UPDATE, and DELETE operations. UNCHANGED and RETAIN
 are excluded. An UPDATE preserves the target's current name spelling.
 
-| Select key | Action |
-|------------|--------|
-| Up/Down, PageUp/PageDown | Move between rows |
-| Space | Toggle the current checkbox |
-| `a` / `0` / `i` | Select All / None / Invert |
-| `c` / `u` / `d` | Toggle the entire Create / Update / Delete group |
-| `/` | Filter by name; selections remain intact |
-| `v` | Toggle Selected Only |
-| `w` | Switch to Edit |
-| `f` | Confirm Export, Apply, or Copy |
-| Tab / Shift-Tab | Focus enabled controls |
-| Esc or `q` in Select, Ctrl-C anywhere | Cancel the session |
+| Select key                            | Action                                           |
+| ------------------------------------- | ------------------------------------------------ |
+| Up/Down, PageUp/PageDown              | Move between rows                                |
+| Space                                 | Toggle the current checkbox                      |
+| `a` / `0` / `i`                       | Select All / None / Invert                       |
+| `c` / `u` / `d`                       | Toggle the entire Create / Update / Delete group |
+| `/`                                   | Filter by name; selections remain intact         |
+| `v`                                   | Toggle Selected Only                             |
+| `w`                                   | Switch to Edit                                   |
+| `f`                                   | Confirm Export, Apply, or Copy                   |
+| Tab / Shift-Tab                       | Focus enabled controls                           |
+| Esc or `q` in Select, Ctrl-C anywhere | Cancel the session                               |
 
 Controls are clickable. Clicking a checkbox selects and toggles its row; clicking
 elsewhere on a row only selects it. Counts include hidden rows. All, None, Invert,
@@ -253,11 +253,11 @@ filesystem Save.
 
 ### Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success. For `diff`: no differences under the effective prune setting. |
-| `1` | `diff` found differences. |
-| `2` | Error: usage, invalid file/config/repository spec, authentication, network, or API failure. |
+| Code | Meaning                                                                                     |
+| ---- | ------------------------------------------------------------------------------------------- |
+| `0`  | Success. For `diff`: no differences under the effective prune setting.                      |
+| `1`  | `diff` found differences.                                                                   |
+| `2`  | Error: usage, invalid file/config/repository spec, authentication, network, or API failure. |
 
 ## The global default deck
 
@@ -340,10 +340,10 @@ it and use it for that run.
 Public repositories allow anonymous reads. Private repositories and write
 operations require a token with these permissions:
 
-| Use | Classic PAT | Fine-grained PAT |
-|-----|-------------|------------------|
-| Read labels (public repo) | none | none |
-| Read labels (private repo) | `repo` | Issues: read + Metadata: read |
+| Use                         | Classic PAT                               | Fine-grained PAT               |
+| --------------------------- | ----------------------------------------- | ------------------------------ |
+| Read labels (public repo)   | none                                      | none                           |
+| Read labels (private repo)  | `repo`                                    | Issues: read + Metadata: read  |
 | Create/update/delete labels | `repo` (or `public_repo` for public only) | Issues: write + Metadata: read |
 
 For `copy`, the token needs write access to the target and read access to a private
@@ -370,11 +370,11 @@ prune = true
 Pruning defaults to `false`. `--prune` or `--no-prune` overrides the config file
 for one invocation. Unknown keys and malformed files cause an error.
 
-| Platform | Configuration directory |
-|----------|-------------------------|
-| Linux | `~/.config/labeldeck` (`$XDG_CONFIG_HOME` honoured) |
-| macOS | `~/Library/Application Support/labeldeck` |
-| Windows | `%APPDATA%\labeldeck` |
+| Platform | Configuration directory                             |
+| -------- | --------------------------------------------------- |
+| Linux    | `~/.config/labeldeck` (`$XDG_CONFIG_HOME` honoured) |
+| macOS    | `~/Library/Application Support/labeldeck`           |
+| Windows  | `%APPDATA%\labeldeck`                               |
 
 Use `LABELDECK_CONFIG_DIR` to choose another directory. It holds `config.toml`,
 the stored `token`, and the global `labels.json` deck.
@@ -397,16 +397,16 @@ sha256sum -c labeldeck-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 
 Published targets:
 
-| Target | Archive |
-|--------|---------|
-| `x86_64-unknown-linux-gnu` | `.tar.gz` |
-| `x86_64-unknown-linux-musl` (static) | `.tar.gz` |
-| `aarch64-unknown-linux-gnu` | `.tar.gz` |
+| Target                                | Archive   |
+| ------------------------------------- | --------- |
+| `x86_64-unknown-linux-gnu`            | `.tar.gz` |
+| `x86_64-unknown-linux-musl` (static)  | `.tar.gz` |
+| `aarch64-unknown-linux-gnu`           | `.tar.gz` |
 | `aarch64-unknown-linux-musl` (static) | `.tar.gz` |
-| `x86_64-apple-darwin` | `.tar.gz` |
-| `aarch64-apple-darwin` | `.tar.gz` |
-| `x86_64-pc-windows-msvc` | `.zip` |
-| `aarch64-pc-windows-msvc` | `.zip` |
+| `x86_64-apple-darwin`                 | `.tar.gz` |
+| `aarch64-apple-darwin`                | `.tar.gz` |
+| `x86_64-pc-windows-msvc`              | `.zip`    |
+| `aarch64-pc-windows-msvc`             | `.zip`    |
 
 Linux GNU builds require glibc 2.28 or newer. On older systems, the installer selects the static musl build.
 
