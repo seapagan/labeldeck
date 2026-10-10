@@ -154,17 +154,6 @@ pub fn resolve_read_selection(
     )
 }
 
-/// Resolve the deck a read command should use (path only).
-pub fn resolve_read_path(
-    explicit: Option<&Path>,
-    global: bool,
-    config_dir: &Path,
-) -> Result<PathBuf> {
-    Ok(resolve_read_selection(explicit, global, config_dir)?
-        .path()
-        .to_path_buf())
-}
-
 /// Resolve where `export` should write.
 ///
 /// `--file -` (stdout) is handled by the caller before this runs.
@@ -267,21 +256,17 @@ mod tests {
     }
 
     #[test]
-    fn public_read_resolvers_reject_conflicting_sources() {
+    fn read_selection_rejects_conflicting_sources() {
         let sandbox = Sandbox::new();
         let explicit = sandbox.root.join("absent-explicit.json");
         let config_dir = sandbox.root.join("absent-config");
-        for error in [
-            resolve_read_selection(Some(&explicit), true, &config_dir)
-                .unwrap_err(),
-            resolve_read_path(Some(&explicit), true, &config_dir).unwrap_err(),
-        ] {
-            assert!(matches!(error, Error::Usage(_)));
-            assert_eq!(
-                error.to_string(),
-                "--file and --global are mutually exclusive"
-            );
-        }
+        let error = resolve_read_selection(Some(&explicit), true, &config_dir)
+            .unwrap_err();
+        assert!(matches!(error, Error::Usage(_)));
+        assert_eq!(
+            error.to_string(),
+            "--file and --global are mutually exclusive"
+        );
     }
 
     #[test]
