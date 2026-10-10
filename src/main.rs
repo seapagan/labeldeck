@@ -30,11 +30,13 @@ fn main() {
         Command::Diff {
             repo,
             file,
+            global,
             prune,
             no_prune,
         } => commands::diff::run(
             &repo,
             file.as_ref(),
+            global,
             labeldeck::cli::prune_override(prune, no_prune),
             cli.no_proxy,
         ),
@@ -42,6 +44,7 @@ fn main() {
             interactive,
             repo,
             file,
+            global,
             prune,
             no_prune,
             dry_run,
@@ -54,6 +57,7 @@ fn main() {
             run(
                 &repo,
                 file.as_ref(),
+                global,
                 labeldeck::cli::prune_override(prune, no_prune),
                 dry_run,
                 cli.no_proxy,

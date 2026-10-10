@@ -11,6 +11,7 @@ use crate::github::RepoSpec;
 pub fn run(
     repo: &str,
     file: Option<&std::path::PathBuf>,
+    global: bool,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
@@ -19,6 +20,7 @@ pub fn run(
     let config_dir = config_dir()?;
     let selection = crate::deck::resolve_read_selection(
         file.map(std::path::PathBuf::as_path),
+        global,
         &config_dir,
     )?;
     let canonical = read_canonical(selection.path())?;
@@ -59,6 +61,7 @@ pub fn run(
 pub fn run_interactive(
     repo: &str,
     file: Option<&std::path::PathBuf>,
+    global: bool,
     cli_prune: Option<bool>,
     dry_run: bool,
     no_proxy: bool,
@@ -73,6 +76,7 @@ pub fn run_interactive(
     let config_dir = config_dir()?;
     let selection = crate::deck::resolve_read_selection(
         file.map(std::path::PathBuf::as_path),
+        global,
         &config_dir,
     )?;
     let canonical = read_canonical(selection.path())?;
@@ -265,17 +269,21 @@ mod tests {
         let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
             b"bad\xff.json",
         ));
-        let guidance =
-            follow_up_command(&repo, &DeckSelection::Explicit(path), true);
-        assert!(!guidance.contains("labeldeck sync"));
-        // The invalid byte is shown as an escape, never silently
-        // rendered as a lossy replacement character.
-        assert!(
-            guidance.contains("bad\\xFF.json")
-                || guidance.contains("bad\\xff.json"),
-            "non-UTF-8 byte must be escaped: {guidance}"
-        );
-        assert!(!guidance.contains('\u{FFFD}'), "{guidance}");
+        for selection in [
+            DeckSelection::Explicit(path.clone()),
+            DeckSelection::Global(path),
+        ] {
+            let guidance = follow_up_command(&repo, &selection, true);
+            assert!(!guidance.contains("labeldeck sync"));
+            // The invalid byte is shown as an escape, never silently
+            // rendered as a lossy replacement character.
+            assert!(
+                guidance.contains("bad\\xFF.json")
+                    || guidance.contains("bad\\xff.json"),
+                "non-UTF-8 byte must be escaped: {guidance}"
+            );
+            assert!(!guidance.contains('\u{FFFD}'), "{guidance}");
+        }
     }
 
     #[test]

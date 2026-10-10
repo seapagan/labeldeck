@@ -11,6 +11,8 @@ use crate::common::{
 
 const REPO: &str = "octocat/hello-world";
 
+mod global;
+
 #[test]
 fn help_exits_zero_and_lists_commands() {
     let isolation = Isolation::new("help");

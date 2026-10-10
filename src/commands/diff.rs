@@ -9,6 +9,7 @@ use crate::plan::{self, Plan};
 pub fn run(
     repo: &str,
     file: Option<&std::path::PathBuf>,
+    global: bool,
     cli_prune: Option<bool>,
     no_proxy: bool,
 ) -> Result<i32> {
@@ -16,6 +17,7 @@ pub fn run(
     let config_dir = crate::commands::config_dir()?;
     let path = crate::deck::resolve_read_path(
         file.map(std::path::PathBuf::as_path),
+        global,
         &config_dir,
     )?;
     let canonical = read_canonical(&path)?;

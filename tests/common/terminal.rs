@@ -18,11 +18,23 @@ pub fn terminal(
     api: &str,
     steps: &[(&str, &str)],
 ) -> String {
+    terminal_in(isolation, args, api, steps, &isolation.config_dir)
+}
+
+pub fn terminal_in(
+    isolation: &Isolation,
+    args: &[&str],
+    api: &str,
+    steps: &[(&str, &str)],
+    cwd: &std::path::Path,
+) -> String {
     let deadline = Instant::now() + TIMEOUT;
     let mut transcript = Vec::new();
-    let result = Session::open(command(isolation, args, api)).and_then(
-        |mut session| session.drive(steps, deadline, &mut transcript),
-    );
+    let mut command = command(isolation, args, api);
+    command.cwd(cwd);
+    let result = Session::open(command).and_then(|mut session| {
+        session.drive(steps, deadline, &mut transcript)
+    });
     assert!(
         result.is_ok(),
         "PTY session failed: {result:?}\n{}",

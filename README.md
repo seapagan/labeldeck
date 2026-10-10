@@ -70,6 +70,7 @@ without changing either:
 
 ```console
 labeldeck diff seapagan/lsplus
+labeldeck diff OWNER/REPO --global
 labeldeck diff seapagan/lsplus --file team-labels.json --prune
 ```
 
@@ -151,10 +152,15 @@ Apply a [selected deck](#the-global-default-deck) to a repository:
 labeldeck sync seapagan/lsplus
 labeldeck sync seapagan/lsplus --file team-labels.json
 labeldeck sync seapagan/lsplus --prune --dry-run
+labeldeck sync OWNER/REPO --global --dry-run
 ```
 
 Use `--dry-run` to preview changes. Use `--prune` to delete labels absent from
 the deck, or `--no-prune` to override a pruning preference in your configuration.
+
+The dry-run rerun guidance pins the selected deck's exact path with `--file`,
+including when you select `--global`. For paths that need shell quoting, it
+shows the repository, file, and pruning setting separately.
 
 If an operation fails, labeldeck stops and reports completed, failed, and skipped
 changes. Completed changes remain in effect.
@@ -177,6 +183,7 @@ The same [authentication](#authentication) token must cover both repositories.
 ```console
 labeldeck export OWNER/REPO -i
 labeldeck sync OWNER/REPO --interactive
+labeldeck sync OWNER/REPO --global --interactive
 labeldeck copy SOURCE TARGET -i
 ```
 
@@ -260,15 +267,23 @@ Save a reusable label set in your [configuration directory](#configuration):
 labeldeck export seapagan/labeldeck --global
 ```
 
-`diff` and `sync` select their deck in this order:
+For `diff` and `sync`, use `--global` to select only
+`<config dir>/labels.json`, even when `./labels.json` exists. This also applies
+to `sync --dry-run` and `sync --interactive`. The configuration directory
+includes any `LABELDECK_CONFIG_DIR` override. `--global` and `--file PATH`
+cannot be combined; `--file PATH` selects that exact path.
+
+Without either flag, `diff` and `sync` select their deck in this order:
 
 ```text
---file PATH → ./labels.json → <config dir>/labels.json
+./labels.json → <config dir>/labels.json
 ```
 
-They use the global deck if no local `labels.json` exists. A missing or invalid
-explicit file, or an unreadable or invalid local deck, causes an error rather
-than a fallback. `edit` requires `--global` to open the global deck.
+They fall back to the global deck only when the local entry is absent. An
+unreadable or invalid local deck, a dangling symlink, a non-file entry, or a
+failed existence check causes an error. An explicit `--file` or `--global`
+selection also errors if its deck is missing, unreadable, or invalid, without
+falling back to another deck. `edit` requires `--global` to open the global deck.
 
 ## Canonical label file
 

@@ -1,5 +1,5 @@
 //! Real terminal boundary tests; portable state/event contracts use TestBackend.
-use crate::common::terminal::terminal;
+use crate::common::terminal::{terminal, terminal_in};
 use crate::common::{Expectation, Isolation, labels_json, mock_github};
 
 #[test]
@@ -57,6 +57,41 @@ fn sync_terminal_session_confirms_after_target_refetch() {
     );
     assert!(output.contains("Synchronized o/r"));
     mock.assert_satisfied();
+}
+
+#[test]
+fn sync_global_terminal_session_applies_global_with_local_present() {
+    let isolation = Isolation::new("interactive-pty-global-sync");
+    let dir = tempfile::tempdir().unwrap();
+    let global = isolation.config_dir.join("labels.json");
+    let local = dir.path().join("labels.json");
+    let global_deck =
+        "[{\"name\":\"global\",\"color\":\"ededed\",\"description\":\"\"}]";
+    let local_deck =
+        "[{\"name\":\"local\",\"color\":\"ededed\",\"description\":\"\"}]";
+    std::fs::write(&global, global_deck).unwrap();
+    std::fs::write(&local, local_deck).unwrap();
+    let page = Expectation::get("/repos/o/r/labels?per_page=100")
+        .labels_page("[]", None);
+    let mock = mock_github(vec![
+        page.clone(),
+        page,
+        Expectation::post("/repos/o/r/labels"),
+    ]);
+    let output = terminal_in(
+        &isolation,
+        &["sync", "o/r", "--global", "--interactive"],
+        mock.base_url(),
+        &[("global", "f"), ("Confirm Apply", "\t\r")],
+        dir.path(),
+    );
+    assert!(output.contains("Synchronized o/r"));
+    mock.assert_satisfied();
+    let body: serde_json::Value =
+        serde_json::from_str(&mock.requests()[2].body).unwrap();
+    assert_eq!(body["name"], "global");
+    assert_eq!(std::fs::read_to_string(global).unwrap(), global_deck);
+    assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
 }
 
 #[test]
