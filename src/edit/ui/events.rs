@@ -1,8 +1,8 @@
-use super::{ConfirmApply, Mode, UiAction, UiState, form::EditForm};
-use crate::edit::{
-    model::{Draft, visible_ids},
-    plan,
+use super::{
+    Control, Modal, ModalKind, Mode, SessionKind, UiAction, UiState,
+    WorkspaceMode, form::EditForm,
 };
+use crate::edit::{model::Draft, plan};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
     MouseEvent, MouseEventKind,
@@ -29,7 +29,7 @@ impl UiState {
     }
 
     fn resize(&mut self, width: u16, height: u16) {
-        self.small = width < 48 || height < 16;
+        self.small = self.too_small(width, height);
         self.buttons.clear();
         self.fields = [ratatui::layout::Rect::default(); 3];
         self.rows = ratatui::layout::Rect::default();
@@ -54,30 +54,43 @@ impl UiState {
                 | KeyModifiers::HYPER
                 | KeyModifiers::META,
         );
-        if self.small {
-            return (!shortcut_modifier
-                && matches!(key.code, KeyCode::Esc | KeyCode::Char('q')))
-            .then_some(UiAction::Cancel);
-        }
         if self.modal.is_some() {
+            // Hidden modals can only be dismissed, never confirmed.
+            if self.small && key.code != KeyCode::Esc {
+                return None;
+            }
             return self.modal_key(key);
+        }
+        if self.small {
+            if !shortcut_modifier
+                && matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+            {
+                return self.key(key);
+            }
+            return None;
         }
         if key.modifiers == KeyModifiers::CONTROL {
             match key.code {
-                KeyCode::Char('z' | 'y') => {
+                KeyCode::Char('z' | 'y')
+                    if self.workspace == WorkspaceMode::Edit =>
+                {
                     self.mode = Mode::List;
                     if key.code == KeyCode::Char('z') {
                         self.document.undo();
                     } else {
                         self.document.redo();
                     }
-                    self.error.clear();
+                    self.message = None;
                     self.repair_selection();
                     return None;
                 }
                 KeyCode::Char('s') => {
                     if matches!(self.mode, Mode::List) {
-                        self.confirm();
+                        if self.session == SessionKind::Edit {
+                            self.confirm();
+                        } else if self.workspace == WorkspaceMode::Edit {
+                            self.open_save();
+                        }
                     }
                     return None;
                 }
@@ -118,7 +131,15 @@ impl UiState {
     }
 
     fn list_key(&mut self, code: KeyCode) -> Option<UiAction> {
+        if self.workspace == WorkspaceMode::Select {
+            return self.select_key(code);
+        }
         match code {
+            KeyCode::Esc | KeyCode::Char('q')
+                if self.session != SessionKind::Edit =>
+            {
+                self.done();
+            }
             KeyCode::Char('q') | KeyCode::Esc => {
                 return Some(UiAction::Cancel);
             }
@@ -130,12 +151,8 @@ impl UiState {
             KeyCode::PageDown => {
                 self.navigate(self.rows.height.max(5) as isize)
             }
-            KeyCode::Tab => {
-                self.button = Some(self.button.map_or(0, |i| (i + 1) % 4))
-            }
-            KeyCode::BackTab => {
-                self.button = Some(self.button.map_or(3, |i| (i + 3) % 4))
-            }
+            KeyCode::Tab => self.focus_control(false),
+            KeyCode::BackTab => self.focus_control(true),
             KeyCode::Enter if self.button.is_some() => {
                 return self.activate(self.button.unwrap());
             }
@@ -150,9 +167,10 @@ impl UiState {
                     },
                 ));
                 self.button = None;
-                self.error.clear();
+                self.message = None;
             }
             KeyCode::Delete => self.delete_selected(),
+            KeyCode::Char('s') => self.open_save(),
             KeyCode::Char('/') => {
                 self.button = None;
                 self.mode = Mode::Filter {
@@ -165,15 +183,54 @@ impl UiState {
         None
     }
 
+    fn select_key(&mut self, code: KeyCode) -> Option<UiAction> {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                return Some(UiAction::Cancel);
+            }
+            KeyCode::Up => self.navigate(-1),
+            KeyCode::Down => self.navigate(1),
+            KeyCode::PageUp => {
+                self.navigate(-(self.rows.height.max(5) as isize))
+            }
+            KeyCode::PageDown => {
+                self.navigate(self.rows.height.max(5) as isize)
+            }
+            KeyCode::Tab => self.focus_control(false),
+            KeyCode::BackTab => self.focus_control(true),
+            KeyCode::Enter if self.button.is_some() => {
+                return self.activate(self.button.unwrap());
+            }
+            KeyCode::Char(' ') => self.toggle_row(),
+            KeyCode::Char('/') => {
+                self.button = None;
+                self.mode = Mode::Filter {
+                    before: self.filter.clone(),
+                    input: Input::new(self.filter.clone()),
+                };
+            }
+            _ => {
+                if let Some(control) = self
+                    .controls()
+                    .into_iter()
+                    .find(|c| c.hotkey_code() == Some(code))
+                {
+                    return self.activate(control);
+                }
+            }
+        }
+        None
+    }
+
     fn delete_selected(&mut self) {
-        let visible = visible_ids(&self.document, &self.filter);
+        let visible = self.visible();
         let Some(index) =
             visible.iter().position(|&id| Some(id) == self.selected)
         else {
             return;
         };
         if self.document.delete(visible[index]) {
-            let remaining = visible_ids(&self.document, &self.filter);
+            let remaining = self.visible();
             self.selected = remaining
                 .get(index.min(remaining.len().saturating_sub(1)))
                 .copied();
@@ -182,7 +239,7 @@ impl UiState {
 
     fn navigate(&mut self, distance: isize) {
         self.button = None;
-        let visible = visible_ids(&self.document, &self.filter);
+        let visible = self.visible();
         let index = visible
             .iter()
             .position(|&id| Some(id) == self.selected)
@@ -208,19 +265,19 @@ impl UiState {
         self.mode =
             Mode::Edit(EditForm::new(Some(entry.id), entry.draft.clone()));
         self.button = None;
-        self.error.clear();
+        self.message = None;
     }
 
     fn edit_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::List;
-                self.error.clear();
+                self.message = None;
                 self.repair_selection();
             }
             KeyCode::Enter => {
                 if let Err(error) = self.commit_form() {
-                    self.error = error;
+                    self.set_error(error);
                 }
             }
             _ => {
@@ -236,10 +293,11 @@ impl UiState {
                             if let Some(request) =
                                 to_input_request(&Event::Key(key))
                             {
-                                self.error = form
+                                let error = form
                                     .handle(request)
                                     .err()
                                     .unwrap_or_default();
+                                self.set_error(error);
                             }
                         }
                     }
@@ -259,7 +317,7 @@ impl UiState {
             self.selected = Some(self.document.create(draft)?);
         }
         self.mode = Mode::List;
-        self.error.clear();
+        self.message = None;
         self.repair_selection();
         Ok(())
     }
@@ -270,7 +328,8 @@ impl UiState {
         }
         match &mut self.mode {
             Mode::Edit(form) => {
-                self.error = form.insert(text).err().unwrap_or_default();
+                let error = form.insert(text).err().unwrap_or_default();
+                self.set_error(error);
             }
             Mode::Filter { input, .. } => {
                 for ch in text.chars().filter(|ch| !ch.is_control()) {
@@ -284,7 +343,10 @@ impl UiState {
     }
 
     pub(super) fn apply_available(&self) -> bool {
-        matches!(self.mode, Mode::List) && self.modal.is_none() && self.dirty()
+        self.workspace == WorkspaceMode::Edit
+            && matches!(self.mode, Mode::List)
+            && self.modal.is_none()
+            && self.dirty()
     }
 
     fn confirm(&mut self) {
@@ -292,45 +354,61 @@ impl UiState {
             return;
         }
         if !self.dirty() {
-            self.error = "No changes to apply.".into();
+            self.set_status("No changes to apply.".into());
             return;
         }
         match plan::plan(&self.document) {
             Ok(plan) => {
-                self.modal = Some(ConfirmApply {
-                    summary: plan.summary,
-                    apply: false,
+                self.modal = Some(Modal {
+                    kind: ModalKind::Apply(plan.summary),
+                    choice: 1,
                 });
                 self.buttons.clear();
-                self.error.clear();
+                self.message = None;
             }
-            Err(error) => self.error = error,
+            Err(error) => self.set_error(error),
         }
     }
 
-    fn activate(&mut self, button: usize) -> Option<UiAction> {
-        if button == 2 {
+    pub(super) fn activate(&mut self, control: Control) -> Option<UiAction> {
+        if control == Control::Apply {
             self.confirm();
             return None;
         }
-        self.error.clear();
-        match button {
-            0 => {
+        if !self.enabled(control) {
+            return None;
+        }
+        self.message = None;
+        match control {
+            Control::Undo => {
                 self.document.undo();
                 self.repair_selection();
             }
-            1 => {
+            Control::Redo => {
                 self.document.redo();
                 self.repair_selection();
             }
-            _ => return Some(UiAction::Cancel),
+            Control::Cancel => return Some(UiAction::Cancel),
+            Control::Apply => unreachable!(),
+            Control::All => self.select_rows(None, Some(true)),
+            Control::None => self.select_rows(None, Some(false)),
+            Control::Invert => self.select_rows(None, None),
+            Control::Group(group) => self.select_rows(Some(group), None),
+            Control::SelectedOnly => {
+                self.selected_only = !self.selected_only;
+                self.repair_selection();
+            }
+            Control::Edit => self.enter_workspace(),
+            Control::Done => self.done(),
+            Control::Save => self.open_save(),
+            Control::Finish => self.confirm_finish(),
         }
         None
     }
 
     fn mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
         if self.modal.is_some() {
-            return self.modal_mouse(mouse);
+            return self.choose_modal_mouse(mouse);
         }
         match &mut self.mode {
             Mode::Edit(form) => {
@@ -342,19 +420,6 @@ impl UiState {
         }
     }
 
-    fn modal_mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
-        let position = Position::new(mouse.column, mouse.row);
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            if self.buttons.first().is_some_and(|r| r.contains(position)) {
-                return Some(UiAction::Apply(self.document.clone()));
-            }
-            if self.buttons.get(1).is_some_and(|r| r.contains(position)) {
-                self.dismiss_modal();
-            }
-        }
-        None
-    }
-
     fn list_mouse(&mut self, mouse: MouseEvent) -> Option<UiAction> {
         let position = Position::new(mouse.column, mouse.row);
         match mouse.kind {
@@ -364,15 +429,19 @@ impl UiState {
                 if let Some(index) =
                     self.buttons.iter().position(|r| r.contains(position))
                 {
-                    return self.activate(index);
+                    return self.activate(self.controls()[index]);
                 }
                 if self.rows.contains(position) {
                     let index = usize::from(mouse.row - self.rows.y)
                         + self.table.offset();
-                    self.selected = visible_ids(&self.document, &self.filter)
-                        .get(index)
-                        .copied();
+                    self.selected = self.visible().get(index).copied();
                     self.button = None;
+                    if self.workspace == WorkspaceMode::Select
+                        && (self.rows.x + 2..self.rows.x + 5)
+                            .contains(&mouse.column)
+                    {
+                        self.toggle_row();
+                    }
                 }
             }
             _ => {}

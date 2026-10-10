@@ -14,17 +14,19 @@ fn main() {
             cli.no_proxy,
         ),
         Command::Export {
+            interactive,
             repo,
             file,
             force,
             global,
-        } => commands::export::run(
-            &repo,
-            file.as_ref(),
-            force,
-            global,
-            cli.no_proxy,
-        ),
+        } => {
+            let run = if interactive {
+                commands::export::run_interactive
+            } else {
+                commands::export::run
+            };
+            run(&repo, file.as_ref(), force, global, cli.no_proxy)
+        }
         Command::Diff {
             repo,
             file,
@@ -37,31 +39,47 @@ fn main() {
             cli.no_proxy,
         ),
         Command::Sync {
+            interactive,
             repo,
             file,
             prune,
             no_prune,
             dry_run,
-        } => commands::sync::run(
-            &repo,
-            file.as_ref(),
-            labeldeck::cli::prune_override(prune, no_prune),
-            dry_run,
-            cli.no_proxy,
-        ),
+        } => {
+            let run = if interactive {
+                commands::sync::run_interactive
+            } else {
+                commands::sync::run
+            };
+            run(
+                &repo,
+                file.as_ref(),
+                labeldeck::cli::prune_override(prune, no_prune),
+                dry_run,
+                cli.no_proxy,
+            )
+        }
         Command::Copy {
+            interactive,
             source,
             target,
             prune,
             no_prune,
             dry_run,
-        } => commands::copy::run(
-            &source,
-            &target,
-            labeldeck::cli::prune_override(prune, no_prune),
-            dry_run,
-            cli.no_proxy,
-        ),
+        } => {
+            let run = if interactive {
+                commands::copy::run_interactive
+            } else {
+                commands::copy::run
+            };
+            run(
+                &source,
+                &target,
+                labeldeck::cli::prune_override(prune, no_prune),
+                dry_run,
+                cli.no_proxy,
+            )
+        }
         Command::Auth(auth) => match auth {
             AuthCommand::Login { token_stdin } => {
                 commands::auth::login(token_stdin, cli.no_proxy)

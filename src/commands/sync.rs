@@ -55,6 +55,51 @@ pub fn run(
     )
 }
 
+/// Select a normal reconciliation plan; working edits never implicitly rewrite the source deck.
+pub fn run_interactive(
+    repo: &str,
+    file: Option<&std::path::PathBuf>,
+    cli_prune: Option<bool>,
+    dry_run: bool,
+    no_proxy: bool,
+) -> Result<i32> {
+    if dry_run {
+        return Err(crate::error::Error::Usage(
+            "--interactive conflicts with --dry-run".into(),
+        ));
+    }
+    crate::edit::session::require_terminal("sync --interactive")?;
+    let repo = repo_spec(repo)?;
+    let config_dir = config_dir()?;
+    let selection = crate::deck::resolve_read_selection(
+        file.map(std::path::PathBuf::as_path),
+        &config_dir,
+    )?;
+    let canonical = read_canonical(selection.path())?;
+    let config = crate::config::load(&config_dir)?;
+    let prune = crate::config::effective_prune(cli_prune, &config);
+    let credentials = credentials_for_write(
+        &config_dir,
+        &mut std::io::stdin().lock(),
+        no_proxy,
+    )?;
+    let client = github_client(Some(&credentials), no_proxy);
+    let context = super::interactive::ReconcileContext {
+        session: crate::edit::ui::SessionKind::Sync,
+        prune,
+        title: format!("{}/{}", repo.owner, repo.name),
+        success_line: format!("Synchronized {}/{}", repo.owner, repo.name),
+        config_dir,
+    };
+    super::interactive::reconcile_with(
+        &client,
+        &repo,
+        canonical,
+        context,
+        crate::edit::session::run,
+    )
+}
+
 /// The "run again" guidance shown after `--dry-run`, pinned to the
 /// exact deck the dry run used.
 ///

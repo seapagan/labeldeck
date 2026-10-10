@@ -57,7 +57,7 @@ fn modified_list_shortcuts_never_fall_through() {
             assert!(matches!(ui.mode, Mode::List));
             assert!(ui.modal.is_none());
             assert!(!ui.document.can_undo());
-            assert!(ui.error.is_empty());
+            assert!(ui.message.is_none());
         }
     }
 }
@@ -76,14 +76,10 @@ fn control_history_and_apply_route_to_committed_document() {
 }
 
 #[test]
-fn enter_on_disabled_apply_never_opens_confirmation() {
+fn unavailable_apply_cannot_be_activated() {
     let mut ui = state();
-    for _ in 0..3 {
-        key(&mut ui, KeyCode::Tab, KeyModifiers::NONE);
-    }
-    assert_eq!(ui.button, Some(2));
     assert!(!ui.apply_available());
-    assert!(key(&mut ui, KeyCode::Enter, KeyModifiers::NONE).is_none());
+    assert!(ui.activate(Control::Apply).is_none());
     assert!(ui.modal.is_none());
     assert!(matches!(ui.mode, Mode::List));
     assert!(!ui.document.can_undo());
@@ -147,7 +143,7 @@ fn apply_in_submodes_preserves_input_and_history() {
         ctrl(&mut ui, 's');
         assert!(ui.modal.is_none());
         assert!(!ui.apply_available());
-        assert!(ui.activate(2).is_none());
+        assert!(ui.activate(Control::Apply).is_none());
         assert!(ui.modal.is_none());
         match &ui.mode {
             Mode::Edit(form) => assert_eq!(form.draft().name, "bug draft"),
@@ -193,84 +189,6 @@ fn modal_owns_keys_before_history_and_mode_routing() {
         key(&mut ui, KeyCode::Enter, KeyModifiers::NONE),
         Some(UiAction::Apply(_))
     ));
-}
-
-const MODAL_MODIFIERS: [KeyModifiers; 7] = [
-    KeyModifiers::CONTROL,
-    KeyModifiers::ALT,
-    KeyModifiers::SUPER,
-    KeyModifiers::META,
-    KeyModifiers::HYPER,
-    KeyModifiers::SHIFT,
-    KeyModifiers::CONTROL.union(KeyModifiers::ALT),
-];
-
-#[test]
-fn modified_modal_enter_never_activates_either_choice() {
-    for modifiers in MODAL_MODIFIERS {
-        for apply in [false, true] {
-            let mut ui = state();
-            ui.delete_selected();
-            ui.confirm();
-            ui.modal.as_mut().unwrap().apply = apply;
-            assert!(key(&mut ui, KeyCode::Enter, modifiers).is_none());
-            assert_eq!(ui.modal.as_ref().unwrap().apply, apply);
-        }
-    }
-}
-
-#[test]
-fn modified_modal_navigation_preserves_focus_and_confirmation() {
-    for modifiers in MODAL_MODIFIERS {
-        for code in [
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::Tab,
-            KeyCode::BackTab,
-            KeyCode::Esc,
-        ] {
-            if modifiers == KeyModifiers::SHIFT && code == KeyCode::BackTab {
-                continue;
-            }
-            let mut ui = state();
-            ui.delete_selected();
-            ui.confirm();
-            for apply in [false, true] {
-                ui.modal.as_mut().unwrap().apply = apply;
-                assert!(key(&mut ui, code, modifiers).is_none());
-                assert_eq!(ui.modal.as_ref().unwrap().apply, apply);
-            }
-        }
-    }
-}
-
-#[test]
-fn shift_backtab_navigates_modal_and_control_c_still_cancels() {
-    let mut ui = state();
-    ui.delete_selected();
-    ui.confirm();
-    assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
-    key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(ui.modal.as_ref().unwrap().apply);
-    assert!(matches!(ctrl(&mut ui, 'c'), Some(UiAction::Cancel)));
-    key(&mut ui, KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert!(!ui.modal.as_ref().unwrap().apply);
-    assert!(key(&mut ui, KeyCode::Enter, KeyModifiers::NONE).is_none());
-    assert!(ui.modal.is_none());
-}
-
-#[test]
-fn apply_button_delegates_no_changes_and_confirmation_to_confirm() {
-    let mut ui = state();
-    assert!(ui.activate(2).is_none());
-    assert!(ui.modal.is_none());
-    assert_eq!(ui.error, "No changes to apply.");
-    ui.delete_selected();
-    assert!(ui.activate(2).is_none());
-    assert!(ui.error.is_empty());
-    assert!(!ui.modal.as_ref().unwrap().apply);
-    assert!(ui.activate(2).is_none());
-    assert!(!ui.modal.as_ref().unwrap().apply);
 }
 
 #[test]
@@ -351,3 +269,103 @@ fn ratatui_advances_offset_without_manual_scroll_management() {
     click(&mut ui, rows.x, rows.y);
     assert_eq!(ui.selected, Some(offset as u64));
 }
+
+#[test]
+fn focus_skips_unavailable_history_and_apply() {
+    let mut ui = state();
+    key(&mut ui, KeyCode::Tab, KeyModifiers::NONE);
+    assert!(matches!(
+        key(&mut ui, KeyCode::Enter, KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+}
+
+fn interactive_state(session: SessionKind) -> UiState {
+    let document = state().document;
+    let mut ui = if session == SessionKind::Export {
+        UiState::export(
+            document,
+            "source".into(),
+            "out.json".into(),
+            ColorLevel::NoColor,
+        )
+    } else {
+        UiState::reconcile(
+            document,
+            "target".into(),
+            session,
+            vec![],
+            false,
+            ColorLevel::NoColor,
+        )
+        .unwrap()
+    };
+    ui.edit_workspace();
+    ui
+}
+
+#[test]
+fn interactive_edit_exit_keys_validate_and_preserve_history_and_saves() {
+    for session in [SessionKind::Export, SessionKind::Sync, SessionKind::Copy]
+    {
+        for code in [KeyCode::Esc, KeyCode::Char('q')] {
+            for small in [false, true] {
+                let mut ui = interactive_state(session);
+                ui.document.delete(0);
+                ui.record_save(Ok(crate::edit::session::SaveRecord {
+                    path: "saved.json".into(),
+                    warning: None,
+                }));
+                if small {
+                    ui.resize(20, 5);
+                }
+                assert!(key(&mut ui, code, KeyModifiers::NONE).is_none());
+                assert_eq!(ui.workspace, WorkspaceMode::Select);
+                assert!(ui.document.can_undo());
+                assert_eq!(ui.saves.len(), 1);
+                ui.document.undo();
+                assert_eq!(ui.document.labels().unwrap().len(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn interactive_edit_exit_rejects_invalid_full_document() {
+    for code in [KeyCode::Esc, KeyCode::Char('q')] {
+        let mut ui = interactive_state(SessionKind::Export);
+        ui.document = crate::edit::model::Document::from_labels(vec![
+            state().document.labels().unwrap()[0].clone(),
+            state().document.labels().unwrap()[0].clone(),
+        ]);
+        assert!(key(&mut ui, code, KeyModifiers::NONE).is_none());
+        assert_eq!(ui.workspace, WorkspaceMode::Edit);
+        assert!(matches!(ui.message, Some(super::super::Message::Error(_))));
+    }
+}
+
+#[test]
+fn q_remains_input_or_cancel_outside_interactive_edit_list() {
+    let mut ui = interactive_state(SessionKind::Export);
+    ui.start_edit();
+    assert!(key(&mut ui, KeyCode::Char('q'), KeyModifiers::NONE).is_none());
+    let Mode::Edit(form) = &ui.mode else {
+        panic!("expected form")
+    };
+    assert_eq!(form.draft().name, "bugq");
+    ui.mode = Mode::List;
+    ui.done();
+    assert!(matches!(
+        key(&mut ui, KeyCode::Char('q'), KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+    assert!(matches!(
+        key(&mut state(), KeyCode::Char('q'), KeyModifiers::NONE),
+        Some(UiAction::Cancel)
+    ));
+}
+
+mod ancestors;
+mod modal;
+mod resize;
+mod save;

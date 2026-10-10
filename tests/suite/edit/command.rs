@@ -96,6 +96,58 @@ fn explicit_non_utf8_paths_remain_supported_by_cli() {
     );
 }
 
+fn assert_file_session_save_protection(path: &Path) {
+    use labeldeck::{
+        commands::edit::edit_file_session_with,
+        edit::{
+            session::{SaveHost, SaveTarget, SessionResult},
+            ui::UiAction,
+        },
+    };
+    std::fs::write(path, "[]").unwrap();
+    let selection = SourceSelection::Explicit(path.into());
+    edit_file_session_with(&selection, |_, title, _, source| {
+        assert_eq!(source, path);
+        if path.to_str().is_none() {
+            assert_ne!(Path::new(title), source);
+        }
+        let host = SaveHost {
+            local: path.into(),
+            config_dir: path.parent().unwrap().join("config"),
+            protected: Some(source.into()),
+        };
+        assert!(matches!(
+            host.save(&changed_document(), SaveTarget::Local),
+            Err(labeldeck::error::Error::Usage(message)) if message.contains("protected")
+        ));
+        SessionResult {
+            outcome: Ok(UiAction::Cancel),
+            saves: Vec::new(),
+        }
+    })
+    .unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), b"[]");
+}
+
+#[test]
+fn file_session_preserves_utf8_source_identity_for_save_protection() {
+    let root = tempfile::tempdir().unwrap();
+    assert_file_session_save_protection(&root.path().join("déck.json"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn file_session_preserves_non_utf8_source_identity_for_save_protection() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let root = tempfile::tempdir().unwrap();
+    let directory =
+        root.path().join(OsString::from_vec(b"deck-\xff".to_vec()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("labels.json");
+    assert!(path.to_str().is_none());
+    assert_file_session_save_protection(&path);
+}
+
 #[cfg(unix)]
 #[test]
 fn local_apply_keeps_staged_write_symlink_policy() {

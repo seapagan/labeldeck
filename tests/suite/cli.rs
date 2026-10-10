@@ -1520,3 +1520,89 @@ fn forced_export_through_a_symlink_replaces_the_target_end_to_end() {
         "the symlink must be preserved"
     );
 }
+
+#[test]
+fn export_accepts_interactive_short_and_long_forms() {
+    use clap::Parser;
+    for flag in ["-i", "--interactive"] {
+        let parsed = labeldeck::cli::Cli::try_parse_from([
+            "labeldeck",
+            "export",
+            "o/r",
+            flag,
+        ]);
+        assert!(parsed.is_ok());
+    }
+}
+
+#[test]
+fn interactive_export_rejects_stdout_before_any_terminal_or_network_work() {
+    let stdout = std::path::PathBuf::from("-");
+    let error = labeldeck::commands::export::run_interactive(
+        "o/r",
+        Some(&stdout),
+        false,
+        false,
+        true,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("--interactive cannot be combined with --file -")
+    );
+}
+
+#[test]
+fn interactive_sync_accepts_both_forms_and_conflicts_with_dry_run() {
+    use clap::Parser;
+    for flag in ["-i", "--interactive"] {
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "sync",
+                "o/r",
+                flag
+            ])
+            .is_ok()
+        );
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "sync",
+                "o/r",
+                flag,
+                "--dry-run"
+            ])
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn interactive_copy_accepts_both_forms_and_conflicts_with_dry_run() {
+    use clap::Parser;
+    for flag in ["-i", "--interactive"] {
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "copy",
+                "o/source",
+                "o/target",
+                flag
+            ])
+            .is_ok()
+        );
+        assert!(
+            labeldeck::cli::Cli::try_parse_from([
+                "labeldeck",
+                "copy",
+                "o/source",
+                "o/target",
+                flag,
+                "--dry-run"
+            ])
+            .is_err()
+        );
+    }
+}

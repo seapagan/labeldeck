@@ -214,6 +214,16 @@ fn post_commit_outcome(
     }
 }
 
+/// Non-mutating early validation; final staged-write checks remain authoritative.
+pub(crate) fn preflight(dest: &Path, force: bool) -> Result<()> {
+    if force {
+        effective_destination(dest, true)?;
+    } else if examine_destination(dest)?.is_some() {
+        return Err(Error::OutputExists { path: dest.into() });
+    }
+    Ok(())
+}
+
 /// Resolve the path the commit will actually act on.
 ///
 /// Without `force` this is always the given path unchanged: the
@@ -266,17 +276,20 @@ fn effective_destination<'a>(
 /// Examine the destination entry itself, without following symlinks.
 /// `None` means the destination is absent.
 fn examine_destination(dest: &Path) -> Result<Option<std::fs::Metadata>> {
-    match std::fs::symlink_metadata(dest) {
+    let result = match std::fs::symlink_metadata(dest) {
         Ok(meta) => Ok(Some(meta)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(Error::Io {
-            context: format!(
-                "could not examine {} while preparing the export",
-                dest.display()
-            ),
-            message: e.to_string(),
-        }),
-    }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            crate::destination_path::resolve(dest).map(|_| None)
+        }
+        Err(e) => Err(e),
+    };
+    result.map_err(|e| Error::Io {
+        context: format!(
+            "could not examine {} while preparing the export",
+            dest.display()
+        ),
+        message: e.to_string(),
+    })
 }
 
 /// Resolve a valid symlink destination, once, to its final target —

@@ -1,4 +1,4 @@
-use super::{UiState, drive};
+use super::{UiAction, UiState, drive_session};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture,
@@ -72,16 +72,13 @@ impl Drop for Guard {
 }
 
 pub(super) fn run(
-    mut state: UiState,
-) -> io::Result<Option<crate::edit::model::Document>> {
-    let _guard = Guard;
-    PanicHookGuard::install().run(|| run_loop(&mut state))
-}
-
-fn run_loop(
     state: &mut UiState,
-) -> io::Result<Option<crate::edit::model::Document>> {
-    let mut terminal = ratatui::try_init()?;
-    execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    drive(&mut terminal, state, event::read)
+    mut service: impl FnMut(&mut UiState, crate::edit::session::SaveRequest),
+) -> io::Result<UiAction> {
+    let _guard = Guard;
+    PanicHookGuard::install().run(|| {
+        let mut terminal = ratatui::try_init()?;
+        execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
+        drive_session(&mut terminal, state, event::read, &mut service)
+    })
 }

@@ -16,6 +16,50 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 
 #[test]
+fn save_modal_styles_actions_by_role_and_activates_global_save() {
+    use labeldeck::edit::session::SaveTarget;
+    for level in [ColorLevel::TrueColor, ColorLevel::NoColor] {
+        let mut ui = UiState::new(
+            Document::from_labels(vec![label("bug")]),
+            "deck".into(),
+            false,
+            level,
+        );
+        ui.set_save_choices([true, true], ["local".into(), "global".into()]);
+        key(&mut ui, KeyCode::Char('s'));
+        key(&mut ui, KeyCode::Tab);
+        let buffer = draw(&mut ui, 80, 24);
+        for text in ["[Save Local]", "[Save Global]"] {
+            let cell = &buffer[locate(&buffer, text)];
+            assert_eq!(
+                cell.fg,
+                if level == ColorLevel::NoColor {
+                    Color::Reset
+                } else {
+                    Color::Green
+                }
+            );
+            assert!(cell.modifier.contains(Modifier::BOLD));
+        }
+        let back = &buffer[locate(&buffer, "[Back]")];
+        assert_eq!(
+            back.fg,
+            if level == ColorLevel::NoColor {
+                Color::Reset
+            } else {
+                Color::Yellow
+            }
+        );
+        assert!(!back.modifier.contains(Modifier::BOLD));
+        key(&mut ui, KeyCode::Tab);
+        assert!(matches!(
+            key(&mut ui, KeyCode::Enter),
+            Some(UiAction::Save(SaveTarget::Global))
+        ));
+    }
+}
+
+#[test]
 fn modal_is_centered_bounded_overlay_with_dimmed_background_and_warning() {
     for (w, h) in [(48, 16), (80, 24), (140, 40)] {
         let mut ui = state(true);
@@ -58,7 +102,7 @@ fn modal_owns_input_and_back_restores_filter_selection_and_footer_focus() {
     key(&mut ui, KeyCode::Enter);
     ui.handle(Event::Paste(" new".into()));
     key(&mut ui, KeyCode::Enter);
-    for _ in 0..3 {
+    for _ in 0..2 {
         key(&mut ui, KeyCode::Tab);
     }
     ctrl(&mut ui, 's');

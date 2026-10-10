@@ -2,13 +2,18 @@
 
 use crate::{
     canonical, deck,
-    edit::{execute, model::Document, plan, ui},
+    edit::{
+        execute,
+        model::Document,
+        plan,
+        session::{self, SaveHost, SessionResult},
+        ui,
+    },
     error::{Error, Result},
     github::{GitHubClient, RepoSpec},
     labels::Label,
     staged_write,
 };
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -112,9 +117,7 @@ pub fn run(
     global: bool,
     no_proxy: bool,
 ) -> Result<i32> {
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        return Err(Error::Usage("edit requires an interactive terminal for input and output; run it directly in a terminal without piping or redirection".into()));
-    }
+    session::require_terminal("edit")?;
     let config_dir = super::config_dir()?;
     let selection =
         select_source(repo, file.map(PathBuf::as_path), global, &config_dir)?;
@@ -126,9 +129,20 @@ pub fn run(
                 no_proxy,
             )?;
             let client = super::github_client(Some(&credentials), no_proxy);
-            edit_remote_with(&client, &repo, open)
+            edit_remote_session_with(
+                &client,
+                &repo,
+                |document, title, live| {
+                    open(document, title, live, &config_dir, None)
+                },
+            )
         }
-        selection => edit_file_with(&selection, open),
+        selection => edit_file_session_with(
+            &selection,
+            |document, title, live, source| {
+                open(document, title, live, &config_dir, Some(source.into()))
+            },
+        ),
     }
 }
 
@@ -138,21 +152,30 @@ pub fn edit_file_with(
     selection: &SourceSelection,
     editor: impl FnOnce(Document, &str, bool) -> Result<Option<Document>>,
 ) -> Result<i32> {
+    edit_file_session_with(selection, |document, title, live, _| {
+        editor_result(editor(document, title, live))
+    })
+}
+
+pub fn edit_file_session_with(
+    selection: &SourceSelection,
+    editor: impl FnOnce(Document, &str, bool, &Path) -> SessionResult,
+) -> Result<i32> {
     let snapshot = load_file(selection)?;
     let document = editor(
         Document::from_labels(snapshot.baseline.clone()),
         &snapshot.path.display().to_string(),
         false,
-    )?;
-    match document {
-        Some(document) => apply_file(
+        &snapshot.path,
+    );
+    finish_edit(document, |document| {
+        apply_file(
             &snapshot.path,
             &snapshot.baseline,
             &snapshot.contents,
             &document,
-        ),
-        None => cancelled(),
-    }
+        )
+    })
 }
 
 /// Run a live session using an already authenticated client.
@@ -161,11 +184,30 @@ pub fn edit_remote_with(
     repo: &RepoSpec,
     editor: impl FnOnce(Document, &str, bool) -> Result<Option<Document>>,
 ) -> Result<i32> {
+    edit_remote_session_with(client, repo, |document, title, live| {
+        editor_result(editor(document, title, live))
+    })
+}
+
+pub fn edit_remote_session_with(
+    client: &GitHubClient,
+    repo: &RepoSpec,
+    editor: impl FnOnce(Document, &str, bool) -> SessionResult,
+) -> Result<i32> {
     let baseline = super::remote_labels(client, repo)?;
     let title = format!("{}/{} (live)", repo.owner, repo.name);
-    match editor(Document::from_labels(baseline.clone()), &title, true)? {
-        Some(document) => apply_remote(client, repo, &baseline, &document),
-        None => cancelled(),
+    let report = editor(Document::from_labels(baseline.clone()), &title, true);
+    finish_edit(report, |document| {
+        apply_remote(client, repo, &baseline, &document)
+    })
+}
+
+fn editor_result(result: Result<Option<Document>>) -> SessionResult {
+    SessionResult {
+        outcome: result.map(|document| {
+            document.map_or(ui::UiAction::Cancel, ui::UiAction::Apply)
+        }),
+        saves: Vec::new(),
     }
 }
 
@@ -173,16 +215,36 @@ fn open(
     document: Document,
     title: &str,
     live: bool,
-) -> Result<Option<Document>> {
-    ui::run(document, title, live).map_err(|error| Error::Io {
-        context: "interactive editor failed".into(),
-        message: error.to_string(),
-    })
+    config_dir: &Path,
+    protected: Option<PathBuf>,
+) -> SessionResult {
+    let host = SaveHost::new(config_dir.into(), protected);
+    let level = colored_text::ColorizeConfig::color_level(
+        colored_text::RenderTarget::Stdout,
+    );
+    session::run(ui::UiState::new(document, title.into(), live, level), host)
 }
 
-fn cancelled() -> Result<i32> {
-    eprintln!("Cancelled; no changes applied.");
-    Ok(0)
+fn finish_edit(
+    report: SessionResult,
+    apply: impl FnOnce(Document) -> Result<i32>,
+) -> Result<i32> {
+    report.report_saves();
+    match report.outcome? {
+        ui::UiAction::Apply(document) => apply(document),
+        ui::UiAction::Cancel => {
+            eprintln!(
+                "{}",
+                if report.saves.is_empty() {
+                    "Cancelled; no changes applied."
+                } else {
+                    "Cancelled; source Apply was not performed. Completed Saves remain on disk."
+                }
+            );
+            Ok(0)
+        }
+        _ => Err(Error::Usage("unexpected editor result".into())),
+    }
 }
 fn nothing() -> Result<i32> {
     eprintln!("Nothing to apply; no changes made.");

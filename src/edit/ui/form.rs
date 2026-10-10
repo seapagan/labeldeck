@@ -137,6 +137,13 @@ impl EditForm {
 
 impl super::UiState {
     fn detail_draft(&self) -> Option<Draft> {
+        if self.workspace == super::WorkspaceMode::Select {
+            return self
+                .candidates()
+                .into_iter()
+                .find(|r| Some(r.id) == self.selected)
+                .map(|r| r.draft);
+        }
         if let super::Mode::Edit(form) = &self.mode {
             Some(form.draft())
         } else {
