@@ -1,5 +1,7 @@
 //! `labeldeck` binary entry point.
 
+use std::path::Path;
+
 use clap::Parser;
 use labeldeck::cli::{AuthCommand, Cli, Command};
 use labeldeck::commands;
@@ -36,11 +38,7 @@ fn main() {
             no_prune,
         } => commands::diff::run(
             &repo,
-            match (file.as_deref(), global) {
-                (Some(path), _) => ReadSource::File(path),
-                (None, true) => ReadSource::Global,
-                (None, false) => ReadSource::Auto,
-            },
+            read_source_from_cli(file.as_deref(), global),
             labeldeck::cli::prune_override(prune, no_prune),
             cli.no_proxy,
         ),
@@ -60,11 +58,7 @@ fn main() {
             };
             run(
                 &repo,
-                match (file.as_deref(), global) {
-                    (Some(path), _) => ReadSource::File(path),
-                    (None, true) => ReadSource::Global,
-                    (None, false) => ReadSource::Auto,
-                },
+                read_source_from_cli(file.as_deref(), global),
                 labeldeck::cli::prune_override(prune, no_prune),
                 dry_run,
                 cli.no_proxy,
@@ -105,5 +99,13 @@ fn main() {
             eprintln!("error: {error}");
             std::process::exit(error.exit_code());
         }
+    }
+}
+
+fn read_source_from_cli(file: Option<&Path>, global: bool) -> ReadSource<'_> {
+    match (file, global) {
+        (Some(path), _) => ReadSource::File(path),
+        (None, true) => ReadSource::Global,
+        (None, false) => ReadSource::Auto,
     }
 }
