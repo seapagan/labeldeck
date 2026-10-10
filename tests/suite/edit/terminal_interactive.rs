@@ -82,7 +82,7 @@ fn sync_global_terminal_session_applies_global_with_local_present() {
         &isolation,
         &["sync", "o/r", "--global", "--interactive"],
         mock.base_url(),
-        &[("global", "f"), ("Confirm Apply", "\t\r")],
+        &[("labeldeck select", "f"), ("Confirm Apply", "\t\r")],
         dir.path(),
     );
     assert!(output.contains("Synchronized o/r"));
@@ -90,6 +90,12 @@ fn sync_global_terminal_session_applies_global_with_local_present() {
     let body: serde_json::Value =
         serde_json::from_str(&mock.requests()[2].body).unwrap();
     assert_eq!(body["name"], "global");
+    let notice = format!("Using global deck: {global:?}");
+    assert_eq!(output.matches("Using global deck:").count(), 1);
+    assert!(output.contains(&notice));
+    assert!(
+        output.find(&notice).unwrap() < output.find("\x1b[?1049h").unwrap()
+    );
     assert_eq!(std::fs::read_to_string(global).unwrap(), global_deck);
     assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
 }

@@ -24,6 +24,7 @@ pub fn run(
         &config_dir,
     )?;
     let canonical = read_canonical(selection.path())?;
+    selection.report_read();
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
 
@@ -80,6 +81,7 @@ pub fn run_interactive(
         &config_dir,
     )?;
     let canonical = read_canonical(selection.path())?;
+    selection.report_read();
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
     let credentials = credentials_for_write(

@@ -15,12 +15,13 @@ pub fn run(
 ) -> Result<i32> {
     let repo = repo_spec(repo)?;
     let config_dir = crate::commands::config_dir()?;
-    let path = crate::deck::resolve_read_path(
+    let selection = crate::deck::resolve_read_selection(
         file.map(std::path::PathBuf::as_path),
         global,
         &config_dir,
     )?;
-    let canonical = read_canonical(&path)?;
+    let canonical = read_canonical(selection.path())?;
+    selection.report_read();
     let config = crate::config::load(&config_dir)?;
     let prune = crate::config::effective_prune(cli_prune, &config);
     let client = github_client(resolve_token(&config_dir).as_ref(), no_proxy);

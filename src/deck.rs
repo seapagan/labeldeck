@@ -52,6 +52,14 @@ impl DeckSelection {
             | DeckSelection::Global(path) => path,
         }
     }
+
+    /// Report a global source on stderr after its deck was read and validated.
+    pub fn report_read(&self) {
+        if let Self::Global(path) = self {
+            // Debug formatting quotes the path and escapes controls and non-UTF-8 bytes.
+            eprintln!("Using global deck: {path:?}");
+        }
+    }
 }
 
 /// Resolution core, parameterised by candidate paths and an existence
@@ -64,6 +72,11 @@ fn resolve_read_with(
     global: &Path,
     mut probe: impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Result<DeckSelection> {
+    if explicit.is_some() && use_global {
+        return Err(Error::Usage(
+            "--file and --global are mutually exclusive".into(),
+        ));
+    }
     if let Some(path) = explicit {
         // Explicit paths are selected verbatim; whether they are
         // readable/valid is the read step's business, not selection's.
@@ -120,7 +133,8 @@ pub fn probe_entry(path: &Path) -> std::io::Result<bool> {
 /// it was chosen.
 ///
 /// Explicit `--file` and `--global` selections are authoritative and
-/// bypass all probes. Otherwise, precedence is the local
+/// mutually exclusive; either selection bypasses all probes.
+/// Otherwise, precedence is the local
 /// `./labels.json` if a filesystem entry with that name exists; then
 /// the global deck likewise. Fallback happens only on a *confirmed*
 /// absence: an existence probe that fails with an I/O error is
@@ -230,6 +244,43 @@ mod tests {
                 };
                 outcome.map_err(std::io::Error::from)
             })
+        }
+    }
+
+    #[test]
+    fn conflicting_read_sources_fail_before_any_probe() {
+        let sandbox = Sandbox::new();
+        let explicit = sandbox.root.join("absent-explicit.json");
+        let local = sandbox.root.join("absent-local.json");
+        let global = sandbox.root.join("absent-global.json");
+        let error =
+            resolve_read_with(Some(&explicit), true, &local, &global, |_| {
+                panic!("conflicting sources must not probe any path")
+            })
+            .unwrap_err();
+        assert!(matches!(error, Error::Usage(_)));
+        assert_eq!(
+            error.to_string(),
+            "--file and --global are mutually exclusive"
+        );
+        assert_eq!(error.exit_code(), 2);
+    }
+
+    #[test]
+    fn public_read_resolvers_reject_conflicting_sources() {
+        let sandbox = Sandbox::new();
+        let explicit = sandbox.root.join("absent-explicit.json");
+        let config_dir = sandbox.root.join("absent-config");
+        for error in [
+            resolve_read_selection(Some(&explicit), true, &config_dir)
+                .unwrap_err(),
+            resolve_read_path(Some(&explicit), true, &config_dir).unwrap_err(),
+        ] {
+            assert!(matches!(error, Error::Usage(_)));
+            assert_eq!(
+                error.to_string(),
+                "--file and --global are mutually exclusive"
+            );
         }
     }
 

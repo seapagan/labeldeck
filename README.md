@@ -273,6 +273,9 @@ to `sync --dry-run` and `sync --interactive`. The configuration directory
 includes any `LABELDECK_CONFIG_DIR` override. `--global` and `--file PATH`
 cannot be combined; `--file PATH` selects that exact path.
 
+After reading a global deck, `diff` and `sync` report its path on stderr,
+whether you select `--global` or use automatic fallback.
+
 Without either flag, `diff` and `sync` select their deck in this order:
 
 ```text
