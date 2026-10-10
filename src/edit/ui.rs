@@ -16,7 +16,7 @@ use super::{
     model::{Document, EntryId, visible_ids},
     plan::ChangeSummary,
 };
-use colored_text::{ColorLevel, ColorizeConfig, RenderTarget};
+use colored_text::ColorLevel;
 use ratatui::{layout::Rect, widgets::TableState};
 use tui_input::Input;
 
@@ -312,32 +312,5 @@ impl UiState {
         if self.selected.is_none_or(|id| !visible.contains(&id)) {
             self.selected = visible.first().copied();
         }
-    }
-}
-
-pub fn run(
-    document: Document,
-    title: &str,
-    live: bool,
-    protected: Option<std::path::PathBuf>,
-) -> std::io::Result<Option<Document>> {
-    let level = ColorizeConfig::color_level(RenderTarget::Stdout);
-    let host = super::session::SaveHost::new(
-        crate::commands::config_dir()
-            .map_err(|error| std::io::Error::other(error.to_string()))?,
-        protected,
-    );
-    let result = super::session::run(
-        UiState::new(document, title.into(), live, level),
-        host,
-    );
-    result.report_saves();
-    match result
-        .outcome
-        .map_err(|error| std::io::Error::other(error.to_string()))?
-    {
-        UiAction::Cancel => Ok(None),
-        UiAction::Apply(document) => Ok(Some(document)),
-        _ => Err(std::io::Error::other("unexpected editor result")),
     }
 }
