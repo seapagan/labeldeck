@@ -110,7 +110,9 @@ fn sync_global_terminal_session_applies_global_with_local_present() {
     assert_eq!(std::fs::read_to_string(&global).unwrap(), global_deck);
     assert_eq!(std::fs::read_to_string(local).unwrap(), local_deck);
     let notice = format!("Using global deck: {global:?}");
-    assert_eq!(output.matches("Using global deck:").count(), 1);
+    // ConPTY can replay the main screen when the alternate screen closes.
+    let before_terminal = output.split_once("\x1b[?1049h").unwrap().0;
+    assert_eq!(before_terminal.matches("Using global deck:").count(), 1);
     assert!(output.contains(&notice));
     assert!(
         output.find(&notice).unwrap() < output.find("\x1b[?1049h").unwrap()
