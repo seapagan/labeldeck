@@ -47,6 +47,12 @@ fn same_linux(left: &Resolved, right: &Resolved) -> io::Result<bool> {
     if left_meta.is_file() {
         return same_linux_entry(&left.path, &right.path);
     }
+    same_linux_suffix(left, right)
+}
+
+/// Compare missing suffixes after establishing a shared ancestor identity.
+#[cfg(target_os = "linux")]
+fn same_linux_suffix(left: &Resolved, right: &Resolved) -> io::Result<bool> {
     let left_suffix = left
         .path
         .strip_prefix(&left.ancestor)
