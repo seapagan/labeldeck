@@ -214,9 +214,11 @@ fn post_commit_outcome(
     }
 }
 
-/// Non-mutating convenience check; the exclusive commit remains authoritative.
+/// Non-mutating early validation; final staged-write checks remain authoritative.
 pub(crate) fn preflight(dest: &Path, force: bool) -> Result<()> {
-    if examine_destination(dest)?.is_some() && !force {
+    if force {
+        effective_destination(dest, true)?;
+    } else if examine_destination(dest)?.is_some() {
         return Err(Error::OutputExists { path: dest.into() });
     }
     Ok(())

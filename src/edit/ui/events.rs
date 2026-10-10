@@ -54,6 +54,13 @@ impl UiState {
                 | KeyModifiers::HYPER
                 | KeyModifiers::META,
         );
+        if self.modal.is_some() {
+            // Hidden modals can only be dismissed, never confirmed.
+            if self.small && key.code != KeyCode::Esc {
+                return None;
+            }
+            return self.modal_key(key);
+        }
         if self.small {
             if !shortcut_modifier
                 && matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
@@ -61,9 +68,6 @@ impl UiState {
                 return self.key(key);
             }
             return None;
-        }
-        if self.modal.is_some() {
-            return self.modal_key(key);
         }
         if key.modifiers == KeyModifiers::CONTROL {
             match key.code {

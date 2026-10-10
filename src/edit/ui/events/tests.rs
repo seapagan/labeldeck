@@ -561,3 +561,5 @@ fn save_modal_refreshes_once_per_open_after_external_alias_change() {
     assert_eq!(opens, 2);
     assert_eq!(std::fs::read_to_string(protected).unwrap(), "protected");
 }
+
+mod resize;

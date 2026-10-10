@@ -280,3 +280,85 @@ fn dangling_export_symlink_is_occupied_before_fetch() {
     );
     assert!(!root.path().join("missing.json").exists());
 }
+
+fn invalid_forced_export(path: &std::path::Path, root: &std::path::Path) {
+    let client = GitHubClient::with_options("http://127.0.0.1:1", None, true);
+    let result = interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        path,
+        true,
+        false,
+        root,
+        |_, _| panic!("driver must not run"),
+    );
+    let error = result.unwrap_err();
+    let text = error.to_string();
+    assert!(text.contains(&path.display().to_string()), "{text}");
+    assert!(
+        text.contains("directory") || text.contains("symbolic link"),
+        "{text}"
+    );
+    assert!(
+        matches!(error, labeldeck::error::Error::Io { .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn forced_directory_export_fails_before_fetch_or_driver() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("deck");
+    std::fs::create_dir(&path).unwrap();
+    invalid_forced_export(&path, root.path());
+    assert_eq!(std::fs::read_dir(&path).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn invalid_forced_symlinks_fail_before_fetch_or_driver() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("directory")).unwrap();
+    for target in ["missing", "directory"] {
+        let path = root.path().join(format!("link-{target}"));
+        std::os::unix::fs::symlink(target, &path).unwrap();
+        invalid_forced_export(&path, root.path());
+        assert_eq!(
+            std::fs::read_link(path).unwrap(),
+            std::path::Path::new(target)
+        );
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 3);
+}
+
+#[test]
+fn forced_export_rechecks_destination_after_session() {
+    let mock = source();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("deck.json");
+    std::fs::write(&path, "original").unwrap();
+    let client = GitHubClient::with_options(mock.base_url(), None, true);
+    let result = interactive_with(
+        &client,
+        &RepoSpec::parse("o/r").unwrap(),
+        &path,
+        true,
+        false,
+        root.path(),
+        |state, _| {
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            SessionResult {
+                outcome: Ok(UiAction::Finish(FinalSelection::Export(
+                    state.selected_labels().unwrap(),
+                ))),
+                saves: Vec::new(),
+            }
+        },
+    );
+    assert!(matches!(result, Err(labeldeck::error::Error::Io { .. })));
+    assert!(path.is_dir());
+    assert_eq!(std::fs::read_dir(path).unwrap().count(), 0);
+    mock.assert_satisfied();
+}

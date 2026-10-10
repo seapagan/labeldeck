@@ -395,7 +395,9 @@ mod symlink_tests {
 fn export_preflight_distinguishes_missing_parents_from_io_errors() {
     let root = tempfile::tempdir().unwrap();
     let missing = root.path().join("missing/config/labels.json");
-    preflight(&missing, false).unwrap();
+    for force in [false, true] {
+        preflight(&missing, force).unwrap();
+    }
     assert!(!missing.parent().unwrap().exists());
     let file = root.path().join("file");
     std::fs::write(&file, "original").unwrap();
@@ -406,4 +408,83 @@ fn export_preflight_distinguishes_missing_parents_from_io_errors() {
         ));
     }
     assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+}
+
+#[test]
+fn preflight_checks_files_directories_and_absence_without_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file.json");
+    let dir = root.path().join("directory");
+    std::fs::write(&file, "original").unwrap();
+    std::fs::create_dir(&dir).unwrap();
+    for force in [false, true] {
+        for missing in ["new.json", "missing/parent/new.json"] {
+            preflight(&root.path().join(missing), force).unwrap();
+        }
+        if force {
+            preflight(&file, force).unwrap();
+            assert!(matches!(preflight(&dir, force), Err(Error::Io { .. })));
+        } else {
+            for occupied in [&file, &dir] {
+                assert!(matches!(
+                    preflight(occupied, force),
+                    Err(Error::OutputExists { .. })
+                ));
+            }
+        }
+    }
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "original");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn preflight_checks_symlink_targets_without_modifying_links_or_targets() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), "original").unwrap();
+    std::fs::create_dir(root.path().join("dir")).unwrap();
+    for target in ["file", "dir", "missing"] {
+        let link = root.path().join(format!("link-{target}"));
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        assert!(matches!(
+            preflight(&link, false),
+            Err(Error::OutputExists { .. })
+        ));
+        if target == "file" {
+            preflight(&link, true).unwrap();
+        } else {
+            assert!(matches!(preflight(&link, true), Err(Error::Io { .. })));
+        }
+        assert_eq!(std::fs::read_link(link).unwrap(), Path::new(target));
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("file")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        std::fs::read_dir(root.path().join("dir")).unwrap().count(),
+        0
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 5);
+}
+
+#[cfg(unix)]
+#[test]
+fn preflight_rejects_unsupported_entries_and_symlink_targets() {
+    let root = tempfile::tempdir().unwrap();
+    let socket = root.path().join("socket");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let link = root.path().join("link");
+    std::os::unix::fs::symlink("socket", &link).unwrap();
+    for path in [&socket, &link] {
+        assert!(matches!(
+            preflight(path, false),
+            Err(Error::OutputExists { .. })
+        ));
+        let error = preflight(path, true).unwrap_err();
+        assert!(error.to_string().contains("not a regular file"));
+    }
+    assert_eq!(std::fs::read_link(link).unwrap(), Path::new("socket"));
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
 }
